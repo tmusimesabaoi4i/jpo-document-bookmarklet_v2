@@ -1,0 +1,84 @@
+# jpo-document-bookmarklet_v2
+
+特許庁（JPO）の Web ページ向けブラウザツール集（モノレポ）です。すべてのツールは完全にブラウザ内で動作し、外部にデータを送信しません。依存パッケージなし（開発ツールは Node.js 18 以降のみ）。
+
+## プロジェクト一覧
+
+| プロジェクト | プロファイル | 内容 |
+|---|---|---|
+| [`document_downloader/`](document_downloader/README.md) | 軽量版 | JPO 文書ページから文書（テキスト / HTML / 画像 / 印刷）を一括保存するブックマークレット |
+| [`claim_relation_writer/`](claim_relation_writer/README.md) | フル版 | クレームの引用関係（クレームツリー）を解析し、明確性・サポート要件の拒絶理由定型文を生成するツール。ローカル版 UI とブックマークレット版の両方あり |
+| [`blank_note_printer/`](blank_note_printer/README.md) | 軽量版 | JPO 文書一覧ページの出願番号から、空白 A4 約 30 枚を印刷して `出願番号_note.pdf` を作るブックマークレット |
+| [`rejection_reason_bookmarklet/`](rejection_reason_bookmarklet/README.md) | フル版 | 拒絶理由通知の全文を解析し、指摘事項（明確性・サポート要件・29条系）を構造化して表形式・別タブレポートで表示するブックマークレット |
+
+## フォルダ構成
+
+```
+jpo-document-bookmarklet_v2/
+├── README.md                  … このファイル
+├── fixtures/                  … 【共有】対象JPOページのHTMLスナップショット（台帳: fixtures/README.md）
+│   ├── document-list/         … 文書一覧ページ（new/ と legacy/）
+│   ├── claim-checker/         … 書類比較・クレームチェッカー（new/ と legacy/）
+│   └── rejection-reason/      … 拒絶理由通知のテキストサンプル
+├── templates/                 … 【共有】新規プロジェクト用の雛形（full/ と lite/。手順: templates/README.md）
+├── document_downloader/       … 軽量版プロジェクト
+│   ├── src/bookmarklet/       … collector.js（編集用）+ collector.bookmarklet.js（1行版）
+│   └── archive/               … ツール旧世代（v1 / v2）の退避
+├── blank_note_printer/        … 軽量版プロジェクト（空白ノート印刷）
+│   ├── src/bookmarklet/       … collector.js（編集用）+ collector.bookmarklet.js（1行版）
+│   └── archive/               … （現在は空）
+├── claim_relation_writer/     … フル版プロジェクト
+│   ├── package.json           … npm test / npm run build:bookmarklets
+│   ├── src/
+│   │   ├── core/              … DOM 非依存のコアロジック
+│   │   ├── local/             … ローカル版 UI（index.html を開くだけで動作）
+│   │   └── bookmarklet/       … ブックマークレット版（common/ がソース、new/・legacy/ が生成物）
+│   ├── scripts/               … ビルドスクリプト
+│   ├── tests/                 … テストスイート（node --test）
+│   ├── examples/              … ロジックのゴールデンケース
+│   └── docs/                  … 詳細仕様書
+└── rejection_reason_bookmarklet/ … フル版プロジェクト（拒絶理由通知の解析・可視化。構成は同上）
+```
+
+## クイックスタート
+
+- **文書を一括保存したい** → `document_downloader/src/bookmarklet/collector.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け（詳細は [document_downloader/README.md](document_downloader/README.md)）
+- **拒絶理由の定型文を作りたい** → `claim_relation_writer/src/local/index.html` をブラウザで開くだけ（詳細は [claim_relation_writer/README.md](claim_relation_writer/README.md)）
+- **空白ノート PDF（`出願番号_note.pdf`）を作りたい** → `blank_note_printer/src/bookmarklet/collector.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け（詳細は [blank_note_printer/README.md](blank_note_printer/README.md)）
+
+## 共有リソースと用語
+
+- **`fixtures/`** = 対象 JPO ページの実物 HTML スナップショット。ブックマークレットの開発・動作確認・テストの土台として、複数プロジェクトから参照される共有資産です。構成規約は `fixtures/<ページ種別>/<世代>/<ページ名>.html`。詳細は [fixtures/README.md](fixtures/README.md)。
+- **`examples/`（各プロジェクト内）** = ロジックのゴールデンケース（入力と期待出力）。ページスナップショット（fixtures）とは別物なので混同しないこと。
+- **世代の語彙**: `new` / `legacy` は「対象ページの世代」（新版 www.beta.jpo.go.jp 系／旧版 gem.prototype.jpo.go.jp 系）を指します。**ツール自体の旧版**は各プロジェクトの `archive/v{N}-<名前>/` に退避します（`legacy` をツール旧版の意味では使いません）。
+
+## 標準プロジェクト構成（新規プロジェクトの追加）
+
+プロジェクトは次の 2 プロファイルのどちらかで作ります。**軽量版はフル版の厳密な部分集合**なので、軽量版で始めてフォルダを足せばフル版に昇格できます。
+
+- **軽量版**（ブックマークレットのみ）: `README.md` + `src/bookmarklet/`（編集用 `X.js` と 1 行版 `X.bookmarklet.js` のペア）+ `archive/`（任意）。ビルドなし・手動反映。
+- **フル版**（ローカル UI + ブックマークレット + テスト + ビルド）: 軽量版 + `package.json` + `src/core/` + `src/local/` + `src/bookmarklet/common/`（ビルド元）+ `scripts/` + `tests/` + `examples/` + `docs/`。
+
+命名規約:
+
+- `X.js`（読みやすい版）と `X.bookmarklet.js`（1 行版）は必ず同じフォルダにペアで置く。
+- 自動生成物の先頭には必ず DO NOT EDIT バナーを付ける（フル版のビルドが付与）。**バナーの有無が「編集してよいか」の目印**（バナーなし = 手編集ソース）。
+- README の見出しは「概要 → フォルダ構成 → クイックスタート →（プロジェクト固有の使い方）→ 対象ページと動作確認 → 開発（ビルド有無を明示）→ 旧版（archive）」の順に揃える。
+
+新規プロジェクトは [`templates/`](templates/README.md) の `full/` または `lite/` をコピーして開始してください。
+
+## ルール: プロジェクト間の独立性
+
+**各プロジェクトは他のプロジェクトに依存してはいけません。** 各プロジェクトは単体で完結させます。
+
+- 他プロジェクトのファイルを**相対パスで参照しない**（`require('../other_project/...')`、ビルドの連結対象への `../other_project/...`、`<script src="../other_project/...">` はすべて禁止）。
+- 他プロジェクトの仕組みを使いたい場合は、**そのプロジェクト内へ機構を取り込む（コピーする）**。取り込んだファイルの冒頭コメントに「どこから取り込んだか」と「一方を直したら他方も直すか判断すること」を明記し、取り込み側でもテストを持つ。
+- 共有してよいのは**データだけ**です（`fixtures/` の対象ページスナップショットなど）。実行コードは共有しません。
+- 理由: プロジェクトを単独でコピー・配布でき、片方の変更が他方のビルドやテストを壊さないようにするため。取り込みによる重複は、この独立性を守るための意図的なコストです。
+- 共有されるのは `fixtures/`（データ）と `templates/`（雛形のコピー元）のみで、いずれも依存関係を作りません。
+
+## 注意
+
+- 各プロジェクトに同名の `collector.js` / `collector.bookmarklet.js` がありますが中身は無関係の別物です。検索時はフォルダ名まで確認してください。
+- `claim_relation_writer` の `npm test` は共有の `fixtures/` を読むテストを含むため、リポジトリ全体をチェックアウトした状態で実行してください。
+- 罫線ツリー記法の解析は `claim_relation_writer/src/core/parser.js` と `rejection_reason_bookmarklet/src/core/claim-tree.js` の**2か所に独立実装**があります（上記「プロジェクト間の独立性」のルールに従った意図的な取り込み）。記法の解釈を変える場合は両方を確認してください。

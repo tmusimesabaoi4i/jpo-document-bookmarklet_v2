@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>実行中… — Claim Relation Writer ブラウザテスト</title>
+<style>
+  body { font-family: "Segoe UI", "Yu Gothic UI", Meiryo, system-ui, sans-serif; margin: 1.5rem; }
+  #verdict.pass { color: #0a7a2f; }
+  #verdict.fail { color: #b00020; }
+  table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+  td, th { border: 1px solid #ccc; padding: .3rem .6rem; font-size: .9rem; text-align: left; vertical-align: top; }
+  tr.pass td:first-child { color: #0a7a2f; }
+  tr.fail td:first-child { color: #b00020; font-weight: bold; }
+  pre { background: #f5f5f5; padding: .5rem; overflow-x: auto; margin: 0; }
+</style>
+</head>
+<body>
+<h1 id="verdict">実行中…</h1>
+<p>コアモジュールとゴールデンケースを、実際のブラウザ環境（file:// を含む）で検証するページです。Node.js がなくても動作確認できます。</p>
+<p id="env"></p>
+<table id="results">
+  <thead><tr><th>結果</th><th>チェック</th><th>詳細</th></tr></thead>
+  <tbody></tbody>
+</table>
+<script src="../src/core/parser.js"></script>
+<script src="../src/core/formatter.js"></script>
+<script src="../src/core/resolver.js"></script>
+<script src="../src/core/generator.js"></script>
+<script src="../src/core/session.js"></script>
+<script src="../examples/examples.js"></script>
+<script>
+(function () {
+  'use strict';
+  const results = [];
+  function check(name, fn) {
+    try {
+      const detail = fn();
+      results.push({ name, ok: true, detail: detail || 'OK' });
+    } catch (e) {
+      results.push({ name, ok: false, detail: String((e && e.message) || e) });
+    }
+  }
+  function assertEqual(actual, expected, label) {
+    const a = JSON.stringify(actual);
+    const b = JSON.stringify(expected);
+    if (a !== b) throw new Error((label || '値') + 'が期待値と不一致\n期待: ' + b + '\n実際: ' + a);
+  }
+
+  const CRW = globalThis.CRW;
+  check('コアモジュールの読み込み（script 順序含む）', () => {
+    for (const m of ['parser', 'formatter', 'resolver', 'generator', 'examples']) {
+      if (!CRW || !CRW[m]) throw new Error(m + ' が読み込まれていません');
+    }
+    return 'parser / formatter / resolver / generator / examples';
+  });
+
+  const graphs = {};
+  function graphOf(key) {
+    if (!graphs[key]) {
+      const r = CRW.parser.parseClaimTree(CRW.examples.trees[key].text);
+      if (!r.ok) throw new Error(key + ' の解析に失敗: ' + JSON.stringify(r.errors));
+      graphs[key] = r.graph;
+    }
+    return graphs[key];
+  }
+
+  check('木構造1の構造（30項・26辺・独立請求項 1,21,27,30）', () => {
+    const g = graphOf('tree1');
+    assertEqual(g.nodes.length, 30, 'ノード数');
+    assertEqual(g.edges.length, 26, '辺数');
+    assertEqual(g.roots, [1, 21, 27, 30], '独立請求項');
+  });
+
+  check('木構造2の多項従属（請求項12の引用先が11項・ノードは1つ）', () => {
+    const g = graphOf('tree2');
+    const parents = g.edges.filter((e) => e[1] === 12).map((e) => e[0]);
+    assertEqual(parents.length, 11, '12の引用先の数');
+    assertEqual(g.nodes.filter((n) => n === 12).length, 1, '12のノード数');
+  });
+
+  check('不変条件: ┗ の閉じ忘れを行番号付きエラーで検出（黙殺しない）', () => {
+    const r = CRW.parser.parseClaimTree('1 ┳ 2 ┳ 3\n  ┣ 8 ┳ 9');
+    if (r.ok) throw new Error('エラーになるべき入力が受理された');
+    return r.errors[0].line + '行目: ' + r.errors[0].message;
+  });
+
+  check('循環する引用関係をエラーで検出（無限ループしない）', () => {
+    const r = CRW.parser.parseClaimTree('1 ━ 2\n2 ━ 1');
+    if (r.ok) throw new Error('循環が検出されなかった');
+    return r.errors[0].message;
+  });
+
+  for (const c of CRW.examples.goldenCases) {
+    check('ゴールデン: ' + c.title, () => {
+      const resolved = CRW.resolver.resolveAffectedClaims(graphOf(c.tree), c.issueClaims, c.relatedClaims);
+      if (!resolved.ok) throw new Error(resolved.error);
+      for (const key of ['issueClaims', 'relatedClaims', 'dependentClaims', 'allAffectedClaims', 'citedSeeds']) {
+        assertEqual(resolved[key], c.expectedSets[key], key);
+      }
+      const text = CRW.generator.generateStatement({ issueType: c.issueType, resolved });
+      if (text !== c.expectedText) {
+        throw new Error('生成文が期待値と不一致\n--- 期待 ---\n' + c.expectedText + '\n--- 実際 ---\n' + text);
+      }
+      return '5集合 + 生成文バイト単位一致';
+    });
+  }
+
+  check('セッション: 上流変更で生成済み文章が無効化される（H-1回帰）', () => {
+    const s0 = CRW.session.createEmptyState();
+    s0.treeText = CRW.examples.trees.tree1.text;
+    const parsed = CRW.parser.parseClaimTree(s0.treeText);
+    if (!parsed.ok) throw new Error('tree1 の解析に失敗');
+    s0.graph = parsed.graph;
+    s0.issueClaimsText = '1';
+    const gen = CRW.session.generateFromState(s0);
+    if (!gen.ok) throw new Error(gen.error);
+    s0.generatedText = gen.text;
+    const s1 = CRW.session.invalidateDownstream(
+      Object.assign({}, s0, { issueClaimsText: '2' }),
+      'issueClaimsText'
+    );
+    assertEqual(s1.generatedText, '', '無効化後の生成文');
+  });
+
+  check('セッション: 入力と食い違う保存済み生成文は復元されず Step3 に戻る', () => {
+    const restored = CRW.session.restoreState({
+      treeText: CRW.examples.trees.tree1.text,
+      issueType: 'clarity',
+      issueClaimsText: '2',
+      relatedClaimsText: '',
+      generatedText: 'ダミー（生成時と食い違う旧文）',
+      currentStep: 4,
+    });
+    assertEqual(restored.generatedText, '', '復元された生成文');
+    assertEqual(restored.currentStep, 3, 'ステップのクランプ');
+  });
+
+  check('localStorage の可用性（不可でもアプリはメモリのみで動作継続する設計）', () => {
+    try {
+      localStorage.setItem('crw.availability-test', '1');
+      localStorage.removeItem('crw.availability-test');
+      return '利用可能';
+    } catch (e) {
+      return '利用不可（メモリのみで動作）';
+    }
+  });
+
+  const tbody = document.querySelector('#results tbody');
+  let failed = 0;
+  for (const r of results) {
+    if (!r.ok) failed++;
+    const tr = document.createElement('tr');
+    tr.className = r.ok ? 'pass' : 'fail';
+    for (const cell of [r.ok ? 'PASS' : 'FAIL', r.name, r.detail]) {
+      const td = document.createElement('td');
+      if (cell && cell.indexOf('\n') !== -1) {
+        const pre = document.createElement('pre');
+        pre.textContent = cell;
+        td.appendChild(pre);
+      } else {
+        td.textContent = cell;
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+
+  const verdict = document.getElementById('verdict');
+  if (failed === 0) {
+    verdict.textContent = '✅ 全 ' + results.length + ' 件成功';
+    verdict.className = 'pass';
+    document.title = 'PASS (' + results.length + ') — Claim Relation Writer ブラウザテスト';
+  } else {
+    verdict.textContent = '❌ ' + failed + ' / ' + results.length + ' 件失敗';
+    verdict.className = 'fail';
+    document.title = 'FAIL (' + failed + '/' + results.length + ') — Claim Relation Writer ブラウザテスト';
+  }
+  document.getElementById('env').textContent =
+    '実行環境: ' + location.protocol + ' / ' + navigator.userAgent;
+  window.__testResults = { total: results.length, failed: failed };
+})();
+</script>
+</body>
+</html>

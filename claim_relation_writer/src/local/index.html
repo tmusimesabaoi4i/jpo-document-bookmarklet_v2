@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claim Relation Writer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>Claim Relation Writer</h1>
+  <p class="app-tagline">クレーム構造から拒絶理由の定型文を生成します（完全ローカル動作・入力内容は外部に送信されません）</p>
+</header>
+
+<main class="app-main">
+  <ol class="steps" id="step-indicator" aria-label="ステップ切替">
+    <li data-step="1"><button type="button" class="step-btn" id="step-btn-1"><span class="step-no">1</span><span class="step-label">クレーム構造</span></button></li>
+    <li data-step="2"><button type="button" class="step-btn" id="step-btn-2"><span class="step-no">2</span><span class="step-label">指摘事項</span></button></li>
+    <li data-step="3"><button type="button" class="step-btn" id="step-btn-3"><span class="step-no">3</span><span class="step-label">請求項指定</span></button></li>
+    <li data-step="4"><button type="button" class="step-btn" id="step-btn-4"><span class="step-no">4</span><span class="step-label">文章生成</span></button></li>
+  </ol>
+
+  <section class="panel" id="panel-1" aria-labelledby="h-step1">
+    <h2 id="h-step1">Step 1: クレーム構造を入力</h2>
+    <p class="hint">罫線文字（┳ ┣ ┃ ┗ ━）で書いたクレームツリーを貼り付けてください。半角・全角スペースやタブが混在していても解析できます。上のステップ表示をクリックすると画面が切り替わります（Step 2 以降へ移るときに自動で解析されます）。</p>
+    <div class="sample-row">
+      <button type="button" id="load-sample" class="secondary">サンプル（木構造1）を読み込む</button>
+    </div>
+    <textarea id="tree-input" class="tree-input" rows="14" spellcheck="false"
+      placeholder="  1 ┳  2 ━  3&#10;    ┣  4&#10;    ┗  5&#10;  6"></textarea>
+    <div id="parse-errors" class="message error" hidden></div>
+  </section>
+
+  <section class="panel" id="panel-2" aria-labelledby="h-step2" hidden>
+    <h2 id="h-step2">Step 2: 指摘する事項を選択</h2>
+    <div id="parse-summary" class="message success" hidden></div>
+    <details class="relations" id="relations-details">
+      <summary>解析された引用関係を確認する</summary>
+      <pre id="relations-pre"></pre>
+    </details>
+    <div class="radio-group" role="radiogroup" aria-label="指摘する事項">
+      <label class="radio-card">
+        <input type="radio" name="issue-type" value="clarity" checked>
+        <span class="radio-body"><strong>明確性</strong><small>…に係る発明は明確でない。</small></span>
+      </label>
+      <label class="radio-card">
+        <input type="radio" name="issue-type" value="support">
+        <span class="radio-body"><strong>サポート要件</strong><small>…に係る発明は、発明の詳細な説明に記載したものでない。</small></span>
+      </label>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-3" aria-labelledby="h-step3" hidden>
+    <h2 id="h-step3">Step 3: 請求項を指定</h2>
+    <p class="hint" id="claims-hint"></p>
+    <label class="field">
+      <span class="field-label">指摘する請求項（必須）</span>
+      <input type="text" id="issue-claims" placeholder="例: 2、4" autocomplete="off">
+    </label>
+    <label class="field">
+      <span class="field-label">関連する請求項（同様の点が指摘される請求項・空欄可）</span>
+      <input type="text" id="related-claims" placeholder="例: 9、13、25" autocomplete="off">
+    </label>
+    <p class="hint">区切りは読点・カンマ・空白。「14-20」のような範囲指定もできます。</p>
+  </section>
+
+  <section class="panel" id="panel-4" aria-labelledby="h-step4" hidden>
+    <h2 id="h-step4">Step 4: 文章を生成</h2>
+    <div class="action-row align-end">
+      <button type="button" id="reset-all" class="danger">最初からやり直す（保存を消去）</button>
+    </div>
+    <textarea id="result" class="result-output" rows="6" spellcheck="false" readonly
+      placeholder="ここに生成された文章が表示されます（下の「生成する」を押してください）"></textarea>
+    <div class="action-row spread">
+      <button type="button" id="generate" class="primary">生成する</button>
+      <div class="action-row-end">
+        <button type="button" id="copy-result" class="secondary" disabled>コピー</button>
+        <span id="copy-feedback" class="copy-feedback" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+    <div id="result-errors" class="message error" hidden></div>
+    <dl id="result-breakdown" class="breakdown" hidden></dl>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <p>すべての処理はこのブラウザ内で完結します。入力したクレーム構造・生成文章が外部サーバーへ送信されることはありません。</p>
+  <p id="storage-note" class="storage-note" hidden></p>
+</footer>
+
+<script src="../core/parser.js"></script>
+<script src="../core/formatter.js"></script>
+<script src="../core/resolver.js"></script>
+<script src="../core/generator.js"></script>
+<script src="../core/session.js"></script>
+<script src="../../examples/examples.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "claim-relation-writer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "クレーム構造（引用関係ツリー）から拒絶理由の定型文を生成する完全ローカルツール",
+  "scripts": {
+    "test": "node --test",
+    "build:bookmarklets": "node scripts/build-bookmarklets.js"
+  }
+}

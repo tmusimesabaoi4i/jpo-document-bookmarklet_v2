@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拒絶理由分析ブックマークレット（開発用）</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <h1>拒絶理由分析ブックマークレット</h1>
+    <p class="app-tagline">拒絶理由通知の全文をブラウザ内だけで解析します（完全ローカル動作・外部送信なし）。</p>
+    <button type="button" id="launch-btn" class="primary">モーダルを起動</button>
+    <p class="dev-note">
+      このページは開発・動作確認用です。実際のブックマークレットは
+      <code>src/bookmarklet/&lt;target&gt;/collector.bookmarklet.js</code> として生成されます。
+    </p>
+  </main>
+  <!-- 読み込み順: コアモジュール（依存されるものが前）→ page-claims → sample-data → report-template → analyzer-app → app.js -->
+  <!-- scripts/build-bookmarklets.js の SOURCE_ORDER と一致させること -->
+  <script src="../core/normalizer.js"></script>
+  <script src="../core/claims.js"></script>
+  <script src="../core/splitter.js"></script>
+  <script src="../core/clarity-support.js"></script>
+  <script src="../core/article29.js"></script>
+  <script src="../core/summarizer.js"></script>
+  <script src="../core/validator.js"></script>
+  <script src="../core/claim-structure.js"></script>
+  <script src="../core/consistency.js"></script>
+  <script src="../core/analyzer.js"></script>
+  <script src="../bookmarklet/common/page-claims.js"></script>
+  <script src="../bookmarklet/common/sample-data.js"></script>
+  <script src="../bookmarklet/common/report-template.js"></script>
+  <script src="../bookmarklet/common/analyzer-app.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

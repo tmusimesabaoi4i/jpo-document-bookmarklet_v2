@@ -1,0 +1,10 @@
+{
+  "name": "TODO-project-name",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TODO: 1行説明（完全ローカル・依存ゼロ）",
+  "scripts": {
+    "test": "node --test",
+    "build:bookmarklets": "node scripts/build-bookmarklets.js"
+  }
+}

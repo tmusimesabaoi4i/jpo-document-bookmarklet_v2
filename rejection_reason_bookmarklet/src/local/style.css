@@ -1,0 +1,74 @@
+/* style.css — ローカル開発ページ用の最小スタイル。
+   モーダル本体（#rrb-host 以下）は Shadow DOM 内で完結しているため、
+   ここではページ側の起動ボタンと説明文だけを整える。 */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f2f4f7;
+  color: #1f2430;
+  font-family: "Segoe UI", "Yu Gothic UI", Meiryo, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+#app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem;
+}
+
+h1 {
+  margin: 0 0 .5rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.app-tagline {
+  margin: 0 0 1.25rem;
+  color: #626b78;
+  font-size: .9rem;
+}
+
+button.primary {
+  appearance: none;
+  font: inherit;
+  padding: .6rem 1.3rem;
+  border: 1px solid #1d4e89;
+  border-radius: 6px;
+  background: #1d4e89;
+  color: #fff;
+  cursor: pointer;
+}
+
+button.primary:hover {
+  background: #163f6f;
+}
+
+button.primary:focus-visible {
+  outline: 2px solid rgba(29, 78, 137, .5);
+  outline-offset: 2px;
+}
+
+.dev-note {
+  margin-top: 1.5rem;
+  padding: .75rem 1rem;
+  border: 1px solid #d8dde3;
+  border-radius: 8px;
+  background: #fff;
+  color: #626b78;
+  font-size: .82rem;
+}
+
+.dev-note code {
+  font-family: "MS Gothic", "ＭＳ ゴシック", Consolas, monospace;
+  background: #eef1f5;
+  padding: .05rem .3rem;
+  border-radius: 4px;
+}

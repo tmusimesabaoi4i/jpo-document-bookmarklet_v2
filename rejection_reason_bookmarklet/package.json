@@ -1,0 +1,10 @@
+{
+  "name": "rejection-reason-bookmarklet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "拒絶理由通知の全文を解析し、指摘事項を構造化して表形式で表示するブックマークレット（完全ローカル・依存ゼロ）",
+  "scripts": {
+    "test": "node --test",
+    "build:bookmarklets": "node scripts/build-bookmarklets.js"
+  }
+}

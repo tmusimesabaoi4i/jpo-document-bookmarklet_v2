@@ -1,0 +1,695 @@
+/* ============================================================================
+   Claim Relation Writer — style.css
+   ローカル動作の特許実務ツール向けスタイルシート。
+   外部リソース（@import・CDN・Webフォント・画像URL）は一切使用しない、
+   完全自己完結のプレーンCSS。文字コードは UTF-8 で保存すること。
+   ============================================================================ */
+
+/* ----------------------------------------------------------------------------
+   [hidden] ガード（最優先・変更禁止）
+   このアプリは Step パネルの切替を hidden 属性の付け外しだけで行っている。
+   後続のセレクタ（例: dl.breakdown の display:grid）が display を設定すると
+   詳細度に関わらず UA の [hidden] ルールを上書きしてしまい画面が壊れるため、
+   このルールを必ずファイルの最初に置き、!important で確実に優先させる。
+---------------------------------------------------------------------------- */
+[hidden] {
+  display: none !important;
+}
+
+/* ----------------------------------------------------------------------------
+   リセット & ボックスモデル
+---------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body,
+h1, h2, h3, h4,
+p, dl, dt, dd,
+ol, ul {
+  margin: 0;
+}
+
+ol, ul {
+  padding: 0;
+  list-style: none;
+}
+
+p, dd, dt, .hint, .message, .radio-body small {
+  overflow-wrap: break-word;
+}
+
+/* ----------------------------------------------------------------------------
+   カラーテーマ（ライト基調 + prefers-color-scheme: dark で控えめに切替）
+---------------------------------------------------------------------------- */
+:root {
+  --bg: #f2f4f7;
+  --surface: #ffffff;
+  --surface-alt: #eef1f5;
+  --border: #d8dde3;
+  --text: #1f2430;
+  --text-muted: #626b78;
+
+  --primary: #1d4e89;
+  --primary-hover: #163f6f;
+  --primary-contrast: #ffffff;
+  --primary-soft: #e6edf7;
+
+  --secondary-bg: #eef1f5;
+  --secondary-bg-hover: #e1e6ec;
+  --secondary-text: #1f2430;
+
+  --danger: #a4302a;
+  --danger-hover: #862520;
+  --danger-contrast: #ffffff;
+
+  --success-bg: #e7f5ea;
+  --success-text: #226a3b;
+  --success-border: #bfe2c8;
+
+  --error-bg: #fbeae9;
+  --error-text: #a4302a;
+  --error-border: #f1c4c0;
+
+  --warning-bg: #fff6e5;
+  --warning-text: #8a5a00;
+  --warning-border: #f0dca8;
+
+  --done-accent: #3d7a4f;
+  --done-accent-contrast: #ffffff;
+
+  --focus-ring: rgba(29, 78, 137, .45);
+  --shadow: rgba(31, 36, 48, .08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1d23;
+    --surface: #23262d;
+    --surface-alt: #2a2e36;
+    --border: #3a3f49;
+    --text: #e6e8ec;
+    --text-muted: #9aa1ac;
+
+    --primary: #7aa8e0;
+    --primary-hover: #93b9e8;
+    --primary-contrast: #10141a;
+    --primary-soft: #223047;
+
+    --secondary-bg: #2f333c;
+    --secondary-bg-hover: #383d47;
+    --secondary-text: #e6e8ec;
+
+    --danger: #e5867e;
+    --danger-hover: #ea9a93;
+    --danger-contrast: #241010;
+
+    --success-bg: #1e3325;
+    --success-text: #8fd3a4;
+    --success-border: #345a41;
+
+    --error-bg: #3a2323;
+    --error-text: #f0a39c;
+    --error-border: #55302f;
+
+    --warning-bg: #3a2f17;
+    --warning-text: #e8c374;
+    --warning-border: #5a4726;
+
+    --done-accent: #4f9463;
+    --done-accent-contrast: #0f1512;
+
+    --focus-ring: rgba(122, 168, 224, .55);
+    --shadow: rgba(0, 0, 0, .4);
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   ベース
+---------------------------------------------------------------------------- */
+html {
+  color-scheme: light dark;
+  scrollbar-color: var(--border) var(--bg);
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: .8;
+}
+
+/* ----------------------------------------------------------------------------
+   レイアウト: ヘッダー / メイン / フッター
+---------------------------------------------------------------------------- */
+.app-header {
+  padding: 1.5rem 1rem 1.25rem;
+  text-align: center;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header h1 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+.app-tagline {
+  max-width: 640px;
+  margin: .5rem auto 0;
+  color: var(--text-muted);
+  font-size: .85rem;
+}
+
+.app-main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.app-footer {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 2rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: .8rem;
+}
+
+.app-footer p {
+  margin: .3rem 0;
+}
+
+.storage-note {
+  margin-top: .75rem;
+  padding: .5rem .75rem;
+  border: 1px solid var(--warning-border);
+  border-radius: 6px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: .8rem;
+  font-weight: 600;
+}
+
+/* 必須スクリプトの読み込みに失敗した場合、JS は body 直下に
+   .message.error を差し込む。app-main の外なので幅だけ揃えておく */
+body > .message {
+  max-width: 900px;
+  margin: 1rem auto;
+}
+
+/* ----------------------------------------------------------------------------
+   ステップインジケータ（ol.steps > li、状態: .active / .done）
+---------------------------------------------------------------------------- */
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: 1.5rem;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: .55rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: .8rem;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease;
+}
+
+.step-no {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: .8rem;
+  font-weight: 700;
+  transition: inherit;
+}
+
+.step-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.steps li.active,
+.steps li[aria-current="step"] {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--text);
+}
+
+.steps li.active .step-no,
+.steps li[aria-current="step"] .step-no {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.steps li.done .step-no {
+  background: var(--done-accent);
+  border-color: var(--done-accent);
+  color: var(--done-accent-contrast);
+}
+
+@media (max-width: 560px) {
+  .steps li {
+    flex: 1 1 calc(50% - .5rem);
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   パネル（カード）
+---------------------------------------------------------------------------- */
+.panel {
+  margin-bottom: 1.25rem;
+  padding: 1.25rem 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
+.panel h2 {
+  margin-bottom: .75rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.hint {
+  margin-bottom: 1rem;
+  color: var(--text-muted);
+  font-size: .85rem;
+  line-height: 1.7;
+}
+
+@media (max-width: 480px) {
+  .panel {
+    padding: 1rem;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   フォーム共通（select / text input / textarea）
+---------------------------------------------------------------------------- */
+select,
+input[type="text"],
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .5rem .65rem;
+}
+
+select:focus-visible,
+input[type="text"]:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-color: var(--primary);
+}
+
+.sample-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .85rem;
+}
+
+.sample-row label {
+  color: var(--text-muted);
+  font-size: .85rem;
+}
+
+.sample-row select {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.field {
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: .35rem;
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.field input[type="text"] {
+  width: 100%;
+}
+
+/* ----------------------------------------------------------------------------
+   罫線ツリー入力 & 解析結果プレビュー（等幅・位置揃え必須）
+   全角罫線 (┳ ┣ ┃ ┗ ━) と半角数字の幅比が 2:1 になる日本語等幅フォントを
+   先頭に指定する。折り返しによるズレを防ぐため wrap させず横スクロールにする。
+---------------------------------------------------------------------------- */
+.tree-input,
+#relations-pre {
+  font-family: "MS Gothic", "ＭＳ ゴシック", "BIZ UDGothic", Consolas, monospace;
+  white-space: pre;
+  tab-size: 4;
+  -moz-tab-size: 4;
+}
+
+.tree-input {
+  width: 100%;
+  padding: .75rem .9rem;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  overflow-x: auto;
+}
+
+.relations {
+  margin-bottom: 1rem;
+}
+
+.relations summary {
+  padding: .3rem 0;
+  color: var(--primary);
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.relations summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+#relations-pre {
+  margin-top: .5rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ----------------------------------------------------------------------------
+   ラジオカード（指摘事項の選択）
+---------------------------------------------------------------------------- */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  margin-bottom: 1rem;
+}
+
+.radio-card {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+
+.radio-card:hover {
+  border-color: var(--primary);
+}
+
+.radio-card input[type="radio"] {
+  flex: 0 0 auto;
+  margin-top: .2rem;
+  accent-color: var(--primary);
+}
+
+.radio-card input[type="radio"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.radio-body {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+
+.radio-body strong {
+  font-size: .95rem;
+}
+
+.radio-body small {
+  color: var(--text-muted);
+  font-size: .8rem;
+}
+
+/* 選択状態の強調: :has() 対応ブラウザはカード全体を強調し、
+   非対応ブラウザでも input:checked + .radio-body で最低限の強調を保つ */
+.radio-card:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.radio-card input:checked + .radio-body strong {
+  color: var(--primary);
+}
+
+/* ----------------------------------------------------------------------------
+   メッセージ（エラー / 成功） — JS が子 div を動的に追加する
+---------------------------------------------------------------------------- */
+.message {
+  margin-bottom: 1rem;
+  padding: .7rem .9rem;
+  border-radius: 8px;
+  font-size: .85rem;
+  line-height: 1.6;
+}
+
+.message div + div {
+  margin-top: .3rem;
+}
+
+.message.error {
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.message.success {
+  border: 1px solid var(--success-border);
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+/* ----------------------------------------------------------------------------
+   ボタン（.primary / .secondary / .danger、:disabled、:focus-visible）
+---------------------------------------------------------------------------- */
+button {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  padding: .55rem 1.1rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+
+button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-contrast);
+}
+
+button.primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+button.secondary {
+  background: var(--secondary-bg);
+  border-color: var(--border);
+  color: var(--secondary-text);
+}
+
+button.secondary:hover {
+  background: var(--secondary-bg-hover);
+}
+
+button.danger {
+  background: var(--surface);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button.danger:hover {
+  background: var(--danger);
+  color: var(--danger-contrast);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ----------------------------------------------------------------------------
+   結果表示 / コピー / 内訳
+---------------------------------------------------------------------------- */
+.result-output {
+  width: 100%;
+  padding: .75rem .9rem;
+  font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  font-size: .95rem;
+  line-height: 1.85;
+  resize: vertical;
+}
+
+.copy-feedback {
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.copy-feedback.ok {
+  color: var(--success-text);
+}
+
+.copy-feedback.ng {
+  color: var(--error-text);
+}
+
+.breakdown {
+  display: grid;
+  grid-template-columns: minmax(10rem, max-content) 1fr;
+  gap: .5rem 1rem;
+  margin-top: 1rem;
+  padding: .9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  font-size: .9rem;
+}
+
+.breakdown dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.breakdown dd {
+  color: var(--text);
+}
+
+@media (max-width: 480px) {
+  .breakdown {
+    grid-template-columns: 1fr;
+  }
+
+  .breakdown dd {
+    margin-bottom: .5rem;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   ナビゲーション行（旧レイアウト互換。現行UIでは .action-row を使用）
+---------------------------------------------------------------------------- */
+.nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-top: 1.25rem;
+}
+
+/* ----------------------------------------------------------------------------
+   ステップインジケータのクリック切替（1ステップ＝1画面の遷移）
+   ol.steps の各チップの中身がボタンになっており、クリックでそのステップ画面へ移る。
+---------------------------------------------------------------------------- */
+.steps li {
+  padding: 0; /* クリック領域（パディング）はボタン側に持たせる */
+}
+
+.step-btn {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+  margin: 0;
+  padding: .55rem .75rem;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.steps li.active .step-btn {
+  cursor: default;
+}
+
+.steps li:not(.active):hover {
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+/* ----------------------------------------------------------------------------
+   アクション行（生成・コピー / 最初からやり直す）
+---------------------------------------------------------------------------- */
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  margin: .5rem 0 .75rem;
+}
+
+.action-row.align-end {
+  justify-content: flex-end;
+}
+
+.action-row.spread {
+  justify-content: space-between;
+}
+
+.action-row-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+}

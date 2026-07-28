@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>実行中… — 拒絶理由解析 ブラウザテスト</title>
+<style>
+  body { font-family: "Segoe UI", "Yu Gothic UI", Meiryo, system-ui, sans-serif; margin: 1.5rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1rem; margin: 1.4rem 0 .3rem; border-bottom: 2px solid #ddd; padding-bottom: .2rem; }
+  #verdict.pass { color: #0a7a2f; }
+  #verdict.fail { color: #b00020; }
+  #summary { font-size: .9rem; color: #444; }
+  table { border-collapse: collapse; margin-top: .4rem; width: 100%; }
+  td, th { border: 1px solid #ccc; padding: .3rem .6rem; font-size: .88rem; text-align: left; vertical-align: top; }
+  th { background: #f2f2f2; }
+  td.mark { width: 2.2rem; text-align: center; font-weight: bold; }
+  tr.pass td.mark { color: #0a7a2f; }
+  tr.fail td.mark { color: #b00020; }
+  tr.fail { background: #fff4f4; }
+  tr.fail td:nth-child(2) { font-weight: bold; }
+  pre { background: #f5f5f5; padding: .5rem; overflow-x: auto; margin: 0; font-size: .82rem; }
+  p.note { font-size: .85rem; color: #555; }
+</style>
+</head>
+<body>
+<h1 id="verdict">実行中…</h1>
+<p class="note">コアモジュール（正規化・請求項番号式・明確性／サポート要件・クレーム構造・整合性検証）を、
+実際のブラウザ環境（file:// を含む）で検証するページです。Node.js が無くても動作確認できます。
+外部リソース・ネットワーク通信は一切ありません。</p>
+<p id="summary"></p>
+<p id="env" class="note"></p>
+<div id="sections"></div>
+
+<script src="../src/core/normalizer.js"></script>
+<script src="../src/core/claims.js"></script>
+<script src="../src/core/splitter.js"></script>
+<script src="../src/core/clarity-support.js"></script>
+<script src="../src/core/article29.js"></script>
+<script src="../src/core/summarizer.js"></script>
+<script src="../src/core/validator.js"></script>
+<script src="../src/core/claim-structure.js"></script>
+<script src="../src/core/consistency.js"></script>
+<script src="../src/core/analyzer.js"></script>
+<script src="../src/bookmarklet/common/sample-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ---- 極小テストランナー ------------------------------------------------
+  const results = [];
+  let currentSection = 'その他';
+  function section(name) { currentSection = name; }
+  function check(name, fn) {
+    try {
+      const detail = fn();
+      results.push({ section: currentSection, name: name, ok: true, detail: detail || 'OK' });
+    } catch (e) {
+      results.push({ section: currentSection, name: name, ok: false, detail: String((e && e.message) || e) });
+    }
+  }
+  function assertEqual(actual, expected, label) {
+    const a = JSON.stringify(actual);
+    const b = JSON.stringify(expected);
+    if (a !== b) throw new Error((label || '値') + 'が期待値と不一致\n期待: ' + b + '\n実際: ' + a);
+  }
+  function assertContains(text, needle, label) {
+    if (String(text).indexOf(needle) === -1) {
+      throw new Error((label || '文字列') + 'に「' + needle + '」が含まれていない\n実際: ' + text);
+    }
+  }
+
+  const RRB = globalThis.RRB || {};
+
+  // ---- 共通の道具 --------------------------------------------------------
+  const CLARITY = { reasonNumber: 1, category: 'clarity', categoryLabel: '明確性', itemNumber: 1 };
+  const SUPPORT = { reasonNumber: 2, category: 'support', categoryLabel: 'サポート要件', itemNumber: 1 };
+
+  function toBlock(lines) {
+    const raw = lines.join('\n');
+    const match = RRB.normalizer.normalizeForMatching(raw);
+    const nl = raw.indexOf('\n');
+    return {
+      headingLineRaw: nl === -1 ? raw : raw.slice(0, nl),
+      headingLineMatch: nl === -1 ? match : match.slice(0, nl),
+      rawText: raw,
+      matchText: match,
+    };
+  }
+
+  function makeItem(overrides) {
+    const base = {
+      itemNumber: 1,
+      headingClaims: [], effectiveHeadingClaims: [], correctionNote: null,
+      directClaims: [], citedParentClaims: [], sameIssueClaims: [],
+      dependencyRelations: [], finalClaims: [],
+      conclusionText: null, conclusionCategory: null,
+      clarityCoreSentence: null, specStatements: [], issueSummary: null,
+    };
+    for (const k in (overrides || {})) base[k] = overrides[k];
+    return base;
+  }
+
+  function claimList(deps, total) {
+    const list = [];
+    for (let n = 1; n <= total; n++) {
+      list.push({
+        claimNumber: n,
+        text: deps[n] ? '請求項' + deps[n] + 'に記載の装置であって、さらに限定を加えた装置。' : '装置。',
+      });
+    }
+    return list;
+  }
+  const byNumber = (st) => {
+    const m = {};
+    for (const c of st.claims) m[c.claimNumber] = c;
+    return m;
+  };
+  const codesOf = (check) => check.issues.map((i) => i.code);
+
+  // 特願2024-203064 のクレーム構造（fixture のページ解析結果と同じ引用関係）
+  const REAL_DEPS = {
+    2: 1, 3: 2, 4: 2, 5: 4, 6: 2, 7: 2,
+    8: 1, 9: 1, 10: 1, 11: 1, 12: 1, 13: 1, 14: 13,
+    15: 1, 16: 1, 17: 1, 18: 17, 19: 1, 20: 1, 21: 1, 22: 1, 23: 1, 24: 1,
+  };
+
+  // ---- 0. 読み込み --------------------------------------------------------
+  section('0. モジュールの読み込み');
+  check('コアモジュールが依存順に読み込まれている', function () {
+    const names = ['normalizer', 'claims', 'splitter', 'claritySupport', 'article29',
+      'summarizer', 'validator', 'claimStructure', 'consistency', 'analyzer', 'sampleData'];
+    for (const m of names) {
+      if (!RRB[m]) throw new Error('RRB.' + m + ' が読み込まれていません');
+    }
+    return names.join(' / ');
+  });
+
+  // ---- 1. HTML → テキスト -------------------------------------------------
+  section('1. クレーム解析結果の取り込み');
+  check('claimHtmlToText: <br> が改行になり他のタグは剥がれる', function () {
+    assertEqual(RRB.claimStructure.claimHtmlToText('A<br>B<br/>C'), 'A\nB\nC', '変換結果');
+    assertEqual(RRB.claimStructure.claimHtmlToText('<b>太字</b>と<span class="zenki_wd18">通常</span>'),
+      '太字と通常', '変換結果');
+    return 'OK';
+  });
+
+  check('claimHtmlToText: ツールが挿入した通番マーカーは span ごと消える', function () {
+    const html = '前<span id="SN1-7" class="showCiteCitedNum" ' +
+      'onclick="jumpToBlink(&#39;R-SN1-7&#39;,&#39;blue&#39;)">[1-7]</span>後';
+    assertEqual(RRB.claimStructure.claimHtmlToText(html), '前後', 'マーカー除去結果');
+    assertEqual(RRB.claimStructure.claimHtmlToText('前<span class="innyou_wd">[注]</span>後'),
+      '前[注]後', 'マーカー以外の span');
+    return 'OK';
+  });
+
+  check('claimHtmlToText: 実体参照の復元順（&amp;lt; → &lt;）', function () {
+    assertEqual(RRB.claimStructure.claimHtmlToText('A&amp;B &lt;t&gt; &quot;q&quot; &#39;s&#39;'),
+      'A&B <t> "q" \'s\'', '実体参照');
+    assertEqual(RRB.claimStructure.claimHtmlToText('&amp;lt;'), '&lt;', '二重エスケープ');
+    return 'OK';
+  });
+
+  check('parseClaimTexts: 4種の見出し括弧と「請求項N」行', function () {
+    const items = RRB.claimStructure.parseClaimTexts(
+      ['【請求項 1】', '本文1。', '【請求項2】', '本文2。', '［請求項3］', '本文3。',
+        '[請求項4]', '本文4。', '請求項5', '本文5。'].join('\n'));
+    assertEqual(items.map((c) => c.claimNumber), [1, 2, 3, 4, 5], '請求項番号');
+    assertEqual(items.map((c) => c.text), ['本文1。', '本文2。', '本文3。', '本文4。', '本文5。'], '本文');
+    return '5 項を抽出';
+  });
+
+  // ---- 2. 引用表現の解析 --------------------------------------------------
+  section('2. 引用表現の解析パターン');
+  const DEP_CASES = [
+    ['請求項1に記載の情報処理装置。', [1], 'single'],
+    ['請求項1又は2に記載の装置。', [1, 2], 'selective'],
+    ['請求項1から3のいずれか一項に記載の装置。', [1, 2, 3], 'selective'],
+    ['請求項1ないし4のいずれか一項に記載の装置。', [1, 2, 3, 4], 'selective'],
+    ['請求項1、2又は4に記載の装置。', [1, 2, 4], 'selective'],
+    ['請求項1から3のいずれかに記載の装置。', [1, 2, 3], 'selective'],
+    ['請求項１又は２に記載の装置。', [1, 2], 'selective'],
+    ['請求項１０に記載の装置。', [10], 'single'],
+    ['請求項2及び3に記載の装置。', [2, 3], 'cumulative'],
+    ['請求項1に記載の情報処理装置において、さらに制御する装置。', [1], 'single'],
+  ];
+  for (const c of DEP_CASES) {
+    check('引用表現: ' + c[0], (function (cc) {
+      return function () {
+        const d = RRB.claimStructure.parseDependencyExpression(cc[0]);
+        if (d === null) throw new Error('引用表現として認識されなかった');
+        assertEqual(d.claims, cc[1], '引用先');
+        assertEqual(d.type, cc[2], '引用の型');
+        return d.expression + ' → ' + JSON.stringify(d.claims) + ' / ' + d.type;
+      };
+    })(c));
+  }
+  check('引用表現: 引用節が無ければ null（独立請求項）', function () {
+    assertEqual(RRB.claimStructure.parseDependencyExpression('通信装置と通信するためのプログラム。'), null, '結果');
+    assertEqual(RRB.claimStructure.parseDependencyExpression(''), null, '空文字');
+    return 'null';
+  });
+  check('引用表現: 2回現れる場合は末尾側を採用する', function () {
+    const d = RRB.claimStructure.parseDependencyExpression(
+      '請求項1に記載の装置を用いて処理する方法であって、請求項3に記載の方法。');
+    assertEqual(d.claims, [3], '引用先');
+    return d.expression;
+  });
+
+  // ---- 3. 構造の構築 ------------------------------------------------------
+  section('3. 引用関係グラフの構築');
+  check('推移閉包: 1←2←3←4', function () {
+    const st = RRB.claimStructure.build([
+      { claimNumber: 1, text: '装置。' },
+      { claimNumber: 2, text: '請求項1に記載の装置。' },
+      { claimNumber: 3, text: '請求項2に記載の装置。' },
+      { claimNumber: 4, text: '請求項3に記載の装置。' },
+    ]);
+    const by = byNumber(st);
+    assertEqual(by[4].allAncestors, [1, 2, 3], '請求項4の全引用元');
+    assertEqual(by[1].allDescendants, [2, 3, 4], '請求項1の全下位');
+    assertEqual(st.independentClaims, [1], '独立請求項');
+    return 'OK';
+  });
+
+  check('多項従属: 請求項5が「1又は2」を引用すると双方の下位になる', function () {
+    const st = RRB.claimStructure.build([
+      { claimNumber: 1, text: '装置。' },
+      { claimNumber: 2, text: '請求項1に記載の装置。' },
+      { claimNumber: 3, text: '請求項1に記載の装置。' },
+      { claimNumber: 4, text: '請求項1に記載の装置。' },
+      { claimNumber: 5, text: '請求項1又は2に記載の装置。' },
+    ]);
+    const by = byNumber(st);
+    assertEqual(by[5].directParents, [1, 2], '請求項5の直接引用元');
+    if (by[2].directChildren.indexOf(5) === -1) throw new Error('請求項2の直接下位に5が無い');
+    return 'OK';
+  });
+
+  const WARN_CASES = [
+    ['欠番（CLAIM_NUMBER_GAP）', [[1, '装置。'], [3, '請求項1に記載の装置。']], 'CLAIM_NUMBER_GAP', null],
+    ['重複（CLAIM_NUMBER_DUPLICATE）',
+      [[1, '装置。'], [2, '請求項1に記載の装置。'], [2, '請求項1に記載の別の装置。']], 'CLAIM_NUMBER_DUPLICATE', null],
+    ['自己引用（CLAIM_SELF_REFERENCE）', [[1, '装置。'], [2, '請求項2に記載の装置。']], null, 'CLAIM_SELF_REFERENCE'],
+    ['存在しない引用先（CLAIM_PARENT_NOT_FOUND）',
+      [[1, '装置。'], [2, '請求項9に記載の装置。']], null, 'CLAIM_PARENT_NOT_FOUND'],
+    ['後方引用（CLAIM_FORWARD_REFERENCE）',
+      [[1, '装置。'], [2, '請求項5に記載の装置。'], [3, '装置。'], [4, '装置。'], [5, '請求項1に記載の装置。']],
+      null, 'CLAIM_FORWARD_REFERENCE'],
+  ];
+  for (const w of WARN_CASES) {
+    check('警告: ' + w[0], (function (ww) {
+      return function () {
+        const st = RRB.claimStructure.build(ww[1].map(function (x) {
+          return { claimNumber: x[0], text: x[1] };
+        }));
+        const all = st.warnings.slice();
+        for (const c of st.claims) for (const cw of c.warnings) all.push(cw);
+        const codes = all.map((x) => x.code);
+        const want = ww[2] || ww[3];
+        if (codes.indexOf(want) === -1) throw new Error(want + ' が出ていない（実際: ' + JSON.stringify(codes) + '）');
+        return want;
+      };
+    })(w));
+  }
+
+  check('循環参照: 無限ループせず両者に CLAIM_CIRCULAR_REFERENCE が付く', function () {
+    const deps = new Map();
+    deps.set(2, [3]);
+    deps.set(3, [2]);
+    const st = RRB.claimStructure.build([
+      { claimNumber: 1, text: '装置。' },
+      { claimNumber: 2, text: '本文2。' },
+      { claimNumber: 3, text: '本文3。' },
+    ], { dependencies: deps });
+    const by = byNumber(st);
+    for (const n of [2, 3]) {
+      if (by[n].warnings.map((w) => w.code).indexOf('CLAIM_CIRCULAR_REFERENCE') === -1) {
+        throw new Error('請求項' + n + 'に循環の警告が無い');
+      }
+    }
+    assertEqual(by[2].allAncestors, [2, 3], '請求項2の全引用元（自身を含む＝循環）');
+    return '停止した';
+  });
+
+  check('引用元が全て無効なら独立請求項として扱う', function () {
+    const st = RRB.claimStructure.build([
+      { claimNumber: 1, text: '装置。' },
+      { claimNumber: 2, text: '請求項9に記載の装置。' },
+    ]);
+    assertEqual(byNumber(st)[2].type, 'independent', '請求項2の型');
+    assertEqual(st.independentClaims, [1, 2], '独立請求項');
+    return 'OK';
+  });
+
+  // ---- 4. ページ側一覧との照合 -------------------------------------------
+  section('4. ページ側の引用関係一覧（#claim_cite）との照合');
+  const CITE_TEXT = [
+    '合計請求項数: 7  (独立請求項: 1)',
+    '[1]請求項1 『・・装置』 独立請求項',
+    '　被引用請求項: 2,3,4,5,6,7(うち間接被引用: 3,4,5,6,7)',
+    '[2]請求項2 『・・装置』 従属請求項',
+    '　引用請求項: 1　引用パターンの数: 1',
+    '　被引用請求項: 3,4,5,6,7(うち間接被引用: 5)',
+    '[3]請求項3 『・・装置』 従属請求項',
+    '　引用請求項: 2 (間接引用: 1)　引用パターンの数: 1',
+    '[4]請求項4 『・・装置』 従属請求項',
+    '　引用請求項: 2 (間接引用: 1)　引用パターンの数: 1',
+    '　被引用請求項: 5',
+    '[5]請求項5 『・・装置』 従属請求項',
+    '　引用請求項: 4 (間接引用: 1,2)　引用パターンの数: 1',
+    '[6]請求項6 『・・装置』 従属請求項',
+    '　引用請求項: 2 (間接引用: 1)　引用パターンの数: 1',
+    '[7]請求項7 『・・装置』 従属請求項',
+    '　引用請求項: 2 (間接引用: 1)　引用パターンの数: 1',
+  ].join('\n');
+
+  check('parseClaimCiteText: 総数・独立請求項・各項目を読む', function () {
+    const cite = RRB.claimStructure.parseClaimCiteText(CITE_TEXT);
+    assertEqual(cite.totalClaimCount, 7, '合計請求項数');
+    assertEqual(cite.independentClaims, [1], '独立請求項');
+    assertEqual(cite.entries.length, 7, '項目数');
+    const e2 = cite.entries[1];
+    assertEqual(e2.directParents, [1], '請求項2の直接引用元');
+    assertEqual(e2.allDescendants, [3, 4, 5, 6, 7], '請求項2の全下位');
+    assertEqual(e2.directChildren, [3, 4, 6, 7], '請求項2の直接下位');
+    assertEqual(cite.entries[4].allAncestors, [1, 2, 4], '請求項5の全引用元');
+    return 'OK';
+  });
+
+  check('回帰: 「被引用請求項」を「引用請求項」と読み違えない', function () {
+    const cite = RRB.claimStructure.parseClaimCiteText(CITE_TEXT);
+    assertEqual(cite.entries[0].directParents, [], '独立請求項1の引用元（空であるべき）');
+    assertEqual(cite.entries[0].directChildren, [2], '請求項1の直接下位');
+    return 'OK';
+  });
+
+  check('crossCheckWithCite: 本文解析とページ側一覧が完全一致（差分なし）', function () {
+    const st = RRB.claimStructure.build(claimList({ 2: 1, 3: 2, 4: 2, 5: 4, 6: 2, 7: 2 }, 7));
+    const cite = RRB.claimStructure.parseClaimCiteText(CITE_TEXT);
+    assertEqual(RRB.claimStructure.crossCheckWithCite(st, cite), [], '照合結果');
+    return '差分 0 件';
+  });
+
+  check('crossCheckWithCite: 構造を1箇所壊すと CLAIM_DEPENDENCY_MISMATCH', function () {
+    const st = RRB.claimStructure.build(claimList({ 2: 1, 3: 2, 4: 2, 5: 4, 6: 2, 7: 2 }, 7));
+    byNumber(st)[2].directParents = [3];
+    const r = RRB.claimStructure.crossCheckWithCite(st, RRB.claimStructure.parseClaimCiteText(CITE_TEXT));
+    if (r.length === 0) throw new Error('不一致が検出されなかった');
+    assertEqual(r[0].code, 'CLAIM_DEPENDENCY_MISMATCH', 'コード');
+    return r[0].message;
+  });
+
+  // ---- 5. 整合性検証（§13.1〜13.6） --------------------------------------
+  section('5. 整合性検証（13.1〜13.6）');
+
+  check('13.1 見出しと結論の不一致（見出し19-20・本文19-20・結論19）', function () {
+    const item = RRB.claritySupport.parseIssueBlock(toBlock([
+      '・請求項 １９-２０',
+      '　請求項１９には「Ａ」が記載されている。',
+      '　請求項２０にも同様の点が指摘される。',
+      '　よって、請求項１９に係る発明は明確でない。',
+    ]), CLARITY);
+    assertEqual(item.headingClaims, [19, 20], '見出し請求項');
+    assertEqual(item.finalClaims, [19], '結論請求項');
+    const c = RRB.consistency.checkItem(item, CLARITY, null);
+    assertEqual(c.missingFromConclusion, [20], '結論から欠落');
+    assertEqual(c.bodyMissingFromConclusion, [20], '本文にあり結論にない');
+    assertEqual(c.status, 'error', 'ステータス');
+    assertEqual(codesOf(c), ['HEADING_CLAIMS_MISSING_IN_CONCLUSION', 'BODY_CLAIMS_MISSING_IN_CONCLUSION'], 'コード');
+    return c.messages[0];
+  });
+
+  check('13.2 結論側に余分な請求項（見出し2-4・結論2-5）', function () {
+    const c = RRB.consistency.checkItem(makeItem({
+      headingClaims: [2, 3, 4], effectiveHeadingClaims: [2, 3, 4],
+      directClaims: [2], sameIssueClaims: [3, 4], finalClaims: [2, 3, 4, 5],
+    }), CLARITY, null);
+    assertEqual(c.unexpectedInConclusion, [5], '結論側の余分');
+    assertEqual(c.status, 'error', 'ステータス');
+    if (codesOf(c).indexOf('CONCLUSION_CLAIMS_NOT_IN_HEADING') === -1) {
+      throw new Error('CONCLUSION_CLAIMS_NOT_IN_HEADING が出ていない');
+    }
+    return c.messages[0];
+  });
+
+  check('13.3 結論の請求項4に本文上の根拠が無い（構造なし）', function () {
+    const c = RRB.consistency.checkItem(makeItem({
+      headingClaims: [2, 3, 4], effectiveHeadingClaims: [2, 3, 4],
+      directClaims: [2], sameIssueClaims: [3], finalClaims: [2, 3, 4],
+    }), CLARITY, null);
+    assertEqual(c.bodyAffectedClaims, [2, 3], '本文上の指摘集合');
+    assertEqual(c.conclusionMissingFromBody, [4], '本文に根拠が無い結論請求項');
+    const issue = c.issues.filter((i) => i.code === 'CONCLUSION_CLAIMS_WITHOUT_BODY_BASIS')[0];
+    if (!issue) throw new Error('CONCLUSION_CLAIMS_WITHOUT_BODY_BASIS が出ていない');
+    assertEqual(issue.severity, 'error', '重大度');
+    assertContains(issue.text, '請求項4', 'メッセージ');
+    return issue.text;
+  });
+
+  check('13.4 引用関係による指摘漏れ（請求項2の直接下位3・4）', function () {
+    const st = RRB.claimStructure.build(claimList({ 2: 1, 3: 2, 4: 2 }, 4));
+    const item = makeItem({
+      headingClaims: [2], effectiveHeadingClaims: [2], directClaims: [2], finalClaims: [2],
+      clarityCoreSentence: '請求項２に係る発明において「Ａ」と「Ｂ」との異同が不明確である。',
+    });
+    const om = RRB.consistency.findOmittedCandidatesForItem(item, CLARITY, st, [2]);
+    assertEqual(om.map((o) => o.omittedClaim), [3, 4], '指摘漏れ候補');
+    assertEqual(om.map((o) => o.dependencyPath), [[2, 3], [2, 4]], '引用経路');
+    assertEqual(om.map((o) => o.inDirectDependency), [true, true], '直接引用か');
+    assertEqual(om.map((o) => o.severity), ['error', 'error'], '重大度');
+    assertEqual(om[0].inheritKind, 'clarity-wording', '承継性の種別');
+    return om.map((o) => o.dependencyPathText).join(' / ');
+  });
+
+  check('13.4 指摘漏れ（3階層 1←2←5←8：間接下位は warning）', function () {
+    const st = RRB.claimStructure.build([
+      { claimNumber: 1, text: '装置。' },
+      { claimNumber: 2, text: '請求項1に記載の装置。' },
+      { claimNumber: 5, text: '請求項2に記載の装置。' },
+      { claimNumber: 8, text: '請求項5に記載の装置。' },
+    ]);
+    const item = makeItem({
+      headingClaims: [2], effectiveHeadingClaims: [2], directClaims: [2], finalClaims: [2],
+      clarityCoreSentence: '請求項２に係る発明は不明確である。',
+    });
+    const om = RRB.consistency.findOmittedCandidatesForItem(item, CLARITY, st, [2]);
+    const c8 = om.filter((o) => o.omittedClaim === 8)[0];
+    if (!c8) throw new Error('請求項8が候補に挙がっていない');
+    assertEqual(c8.dependencyPath, [2, 5, 8], '引用経路');
+    assertEqual(c8.inDirectDependency, false, '直接引用か');
+    assertEqual(c8.severity, 'warning', '重大度');
+    return c8.dependencyPathText + ' / ' + c8.severity;
+  });
+
+  check('13.5 存在しない請求項21を指摘している（全20項）', function () {
+    const deps = {};
+    for (let n = 2; n <= 20; n++) deps[n] = 1;
+    const st = RRB.claimStructure.build(claimList(deps, 20));
+    const reasons = [{
+      reasonNumber: 1,
+      items: [makeItem({
+        headingClaims: [21], effectiveHeadingClaims: [21], directClaims: [21], finalClaims: [21],
+      })],
+    }];
+    const issues = RRB.consistency.validateClaimExistence(reasons, st);
+    assertEqual(issues.length, 1, '指摘件数');
+    assertEqual(issues[0].severity, 'error', '重大度');
+    assertEqual(issues[0].code, 'CLAIM_NOT_IN_SCOPE', 'コード');
+    assertContains(issues[0].text, '請求項21', 'メッセージ');
+    assertContains(issues[0].text, '存在しません', 'メッセージ');
+    return issues[0].text;
+  });
+
+  check('13.6 修正注記で除外した請求項5が結論に残っている', function () {
+    const c = RRB.consistency.checkItem(makeItem({
+      headingClaims: [3, 4, 5], effectiveHeadingClaims: [3, 4],
+      correctionNote: { raw: '修正：５を除く', excluded: [5], added: [], recognized: true },
+      directClaims: [3], sameIssueClaims: [4], finalClaims: [3, 4, 5],
+    }), SUPPORT, null);
+    assertEqual(c.unexpectedInConclusion, [5], '結論側の余分（修正注記適用後の見出しと比較）');
+    assertEqual(c.status, 'error', 'ステータス');
+    const issue = c.issues.filter((i) => i.code === 'CONCLUSION_CLAIMS_NOT_IN_HEADING')[0];
+    assertContains(issue.text, '修正注記で請求項5が除外', 'メッセージ');
+    return issue.text;
+  });
+
+  // ---- 6. 承継性・引用関係の照合・§7.3 -----------------------------------
+  section('6. 承継性の判定と引用関係の照合');
+
+  check('承継性: 矛盾 / サポート / 明確性 は strong、判別不能は weak', function () {
+    const a = RRB.consistency.assessInheritability(
+      makeItem({ clarityCoreSentence: '発明特定事項同士の関係が整合しておらず不明確である。' }), 'clarity');
+    assertEqual([a.kind, a.strength], ['contradiction', 'strong'], '矛盾');
+    const b = RRB.consistency.assessInheritability(makeItem({}), 'support');
+    assertEqual([b.kind, b.strength], ['support-missing', 'strong'], 'サポート要件');
+    const c = RRB.consistency.assessInheritability(makeItem({}), 'clarity');
+    assertEqual([c.kind, c.strength], ['clarity-wording', 'strong'], '明確性');
+    const d = RRB.consistency.assessInheritability(makeItem({}), null);
+    assertEqual([d.kind, d.strength], ['other', 'weak'], '判別不能');
+    return 'OK';
+  });
+
+  check('承継性が weak なら直接下位でも指摘漏れは warning 止まり', function () {
+    const st = RRB.claimStructure.build(claimList({ 2: 1, 3: 2 }, 3));
+    const om = RRB.consistency.findOmittedCandidatesForItem(
+      makeItem({ headingClaims: [2], effectiveHeadingClaims: [2], directClaims: [2], finalClaims: [2] }),
+      { reasonNumber: 1, category: null, categoryLabel: 'その他' }, st, [2]);
+    assertEqual(om.length, 1, '候補件数');
+    assertEqual([om[0].inDirectDependency, om[0].severity], [true, 'warning'], '直接下位でも warning');
+    return om[0].severity;
+  });
+
+  check('§14 実構造と一致する引用関係の記載はエラーにならない', function () {
+    const st = RRB.claimStructure.build(claimList(REAL_DEPS, 26));
+    const item = makeItem({ dependencyRelations: [{ parentClaims: [2, 4], affectedClaims: [5, 6, 7] }] });
+    assertEqual(RRB.consistency.crossCheckStatedDependencies(item, CLARITY, st), [], '照合結果');
+    return '差分なし';
+  });
+
+  check('§14 請求項7が請求項1しか引用しない構造では STATED_DEPENDENCY_MISMATCH', function () {
+    const st = RRB.claimStructure.build(claimList({ 2: 1, 3: 2, 4: 2, 5: 4, 6: 2, 7: 1 }, 7));
+    const item = makeItem({ dependencyRelations: [{ parentClaims: [2, 4], affectedClaims: [5, 6, 7] }] });
+    const issues = RRB.consistency.crossCheckStatedDependencies(item, CLARITY, st);
+    assertEqual(issues.length, 1, '指摘件数');
+    assertEqual(issues[0].code, 'STATED_DEPENDENCY_MISMATCH', 'コード');
+    assertContains(issues[0].text, '請求項7', 'メッセージ');
+    return issues[0].text;
+  });
+
+  check('§7.3 構造があれば「見出しのみの請求項」は info、無ければ warn', function () {
+    const st = RRB.claimStructure.build(claimList({ 2: 1, 3: 2, 4: 2 }, 4));
+    const item = makeItem({
+      headingClaims: [2, 3, 4], effectiveHeadingClaims: [2, 3, 4],
+      directClaims: [2], finalClaims: [2, 3, 4],
+    });
+    const withSt = RRB.consistency.checkItem(item, CLARITY, st);
+    const info = withSt.issues.filter((i) => i.code === 'HEADING_CLAIMS_COVERED_BY_STRUCTURE')[0];
+    if (!info) throw new Error('HEADING_CLAIMS_COVERED_BY_STRUCTURE が出ていない');
+    assertEqual(info.severity, 'info', '重大度（構造あり）');
+    if (codesOf(withSt).indexOf('HEADING_CLAIMS_WITHOUT_BODY_BASIS') !== -1) {
+      throw new Error('構造で説明できるのに warn が残っている');
+    }
+    const noSt = RRB.consistency.checkItem(item, CLARITY, null);
+    const warn = noSt.issues.filter((i) => i.code === 'HEADING_CLAIMS_WITHOUT_BODY_BASIS')[0];
+    if (!warn) throw new Error('HEADING_CLAIMS_WITHOUT_BODY_BASIS が出ていない');
+    assertEqual(warn.severity, 'warn', '重大度（構造なし）');
+    return 'info / warn';
+  });
+
+  // ---- 7. サンプル拒絶理由での通し検証 ------------------------------------
+  section('7. サンプル拒絶理由での通し検証');
+
+  check('サンプル全文の解析（理由2件・指摘項目6件）', function () {
+    const res = RRB.analyzer.analyze(RRB.sampleData.text);
+    assertEqual(res.reasons.length, 2, '理由の数');
+    const itemCount = res.reasons.reduce((a, r) => a + r.items.length, 0);
+    assertEqual(itemCount, 6, '指摘項目の数');
+    assertEqual(res.reasons.map((r) => r.category), ['clarity', 'support'], '分類');
+    return '理由2件 / 項目6件';
+  });
+
+  check('クレーム構造つきの通し検証（26項・独立1,25,26）', function () {
+    const st = RRB.claimStructure.build(claimList(REAL_DEPS, 26), { source: 'claim_mark' });
+    assertEqual(st.totalClaimCount, 26, '全請求項数');
+    assertEqual(st.independentClaims, [1, 25, 26], '独立請求項');
+    assertEqual(st.warnings, [], '構造の警告');
+    const by = byNumber(st);
+    assertEqual(by[1].directChildren,
+      [2, 8, 9, 10, 11, 12, 13, 15, 16, 17, 19, 20, 21, 22, 23, 24], '請求項1の直接下位');
+    assertEqual(by[2].allDescendants, [3, 4, 5, 6, 7], '請求項2の全下位');
+    assertEqual(by[5].allAncestors, [1, 2, 4], '請求項5の全引用元');
+    assertEqual(st.findPath(2, 5), [2, 4, 5], 'findPath(2,5)');
+    assertEqual(st.findPath(19, 20), null, 'findPath(19,20)');
+    return 'OK';
+  });
+
+  check('run(): 理由2 項目2 のみ error・指摘漏れ候補5件はすべて info', function () {
+    const st = RRB.claimStructure.build(claimList(REAL_DEPS, 26), { source: 'claim_mark' });
+    const res = RRB.analyzer.analyze(RRB.sampleData.text, { claimStructure: st });
+    assertEqual(res.consistencyChecks.length, 6, '整合性検証の件数');
+    const target = res.consistencyChecks.filter(
+      (c) => c.reasonNumber === 2 && c.itemNumber === 2)[0];
+    assertEqual(target.status, 'error', '理由2 項目2 のステータス');
+    assertEqual(codesOf(target),
+      ['CONCLUSION_CLAIMS_NOT_IN_HEADING', 'BODY_CLAIMS_NOT_IN_HEADING'], '理由2 項目2 のコード');
+    for (const c of res.consistencyChecks) {
+      if (c === target) continue;
+      if (c.status !== 'ok') {
+        throw new Error('理由' + c.reasonNumber + ' 項目' + c.itemNumber + ' が ok でない: ' + c.status);
+      }
+    }
+    assertEqual(res.omittedClaimCandidates.map((o) => o.omittedClaim), [3, 4, 5, 6, 7], '指摘漏れ候補');
+    assertEqual(res.omittedClaimCandidates.map((o) => o.severity),
+      ['info', 'info', 'info', 'info', 'info'], '指摘漏れ候補の重大度');
+    assertEqual(res.omittedClaimCandidates.map((o) => o.coveredElsewhereInReason),
+      [true, true, true, true, true], '同一理由の他項目でカバー済み');
+    assertEqual(res.metadata.issueCounts.error, 2, 'error の件数');
+    return 'error 2 / info ' + res.metadata.issueCounts.info;
+  });
+
+  check('同一理由の他項目でカバーされていなければ error に上がる', function () {
+    const st = RRB.claimStructure.build(claimList(REAL_DEPS, 26), { source: 'claim_mark' });
+    const res = RRB.analyzer.analyze(RRB.sampleData.text);
+    const item = res.reasons.filter((r) => r.reasonNumber === 2)[0].items[0];
+    const om = RRB.consistency.findOmittedCandidatesForItem(item, SUPPORT, st, [2]);
+    assertEqual(om.map((o) => o.omittedClaim), [3, 4, 5, 6, 7], '指摘漏れ候補');
+    const sev = {};
+    for (const o of om) sev[o.omittedClaim] = o.severity;
+    assertEqual([sev[3], sev[4], sev[6], sev[7]], ['error', 'error', 'error', 'error'], '直接下位');
+    assertEqual(sev[5], 'warning', '間接下位（2 → 4 → 5）');
+    return JSON.stringify(sev);
+  });
+
+  // ---- 描画 ---------------------------------------------------------------
+  const sectionsEl = document.getElementById('sections');
+  const order = [];
+  const grouped = {};
+  for (const r of results) {
+    if (!grouped[r.section]) { grouped[r.section] = []; order.push(r.section); }
+    grouped[r.section].push(r);
+  }
+  let failed = 0;
+  for (const name of order) {
+    const h2 = document.createElement('h2');
+    h2.textContent = name;
+    sectionsEl.appendChild(h2);
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    for (const label of ['結果', 'チェック内容', '詳細']) {
+      const th = document.createElement('th');
+      th.textContent = label;
+      if (label === '結果') th.style.width = '2.2rem';
+      htr.appendChild(th);
+    }
+    thead.appendChild(htr);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const r of grouped[name]) {
+      if (!r.ok) failed++;
+      const tr = document.createElement('tr');
+      tr.className = r.ok ? 'pass' : 'fail';
+      const cells = [r.ok ? '✓' : '✗', r.name, r.detail];
+      cells.forEach(function (cell, i) {
+        const td = document.createElement('td');
+        if (i === 0) td.className = 'mark';
+        if (cell && String(cell).indexOf('\n') !== -1) {
+          const pre = document.createElement('pre');
+          pre.textContent = cell;
+          td.appendChild(pre);
+        } else {
+          td.textContent = cell;
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    sectionsEl.appendChild(table);
+  }
+
+  const verdict = document.getElementById('verdict');
+  const passed = results.length - failed;
+  if (failed === 0) {
+    verdict.textContent = '✓ 全 ' + results.length + ' 件成功';
+    verdict.className = 'pass';
+    document.title = 'PASS (' + results.length + ') — 拒絶理由解析 ブラウザテスト';
+  } else {
+    verdict.textContent = '✗ ' + failed + ' / ' + results.length + ' 件失敗';
+    verdict.className = 'fail';
+    document.title = 'FAIL (' + failed + '/' + results.length + ') — 拒絶理由解析 ブラウザテスト';
+  }
+  document.getElementById('summary').textContent =
+    '成功 ' + passed + ' 件 / 失敗 ' + failed + ' 件 / 合計 ' + results.length + ' 件';
+  document.getElementById('env').textContent =
+    '実行環境: ' + location.protocol + ' / ' + navigator.userAgent;
+  window.__testResults = { total: results.length, passed: passed, failed: failed };
+})();
+</script>
+</body>
+</html>

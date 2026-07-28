@@ -1,0 +1,7 @@
+# OS / OneDrive
+desktop.ini
+Thumbs.db
+~$*
+
+# Node.js（依存ゼロ方針だが、誤って install した場合の保険）
+node_modules/
