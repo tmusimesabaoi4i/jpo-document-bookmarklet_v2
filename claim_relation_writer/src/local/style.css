@@ -307,6 +307,16 @@ body > .message {
   line-height: 1.7;
 }
 
+/* 入力書式の選択肢など、箇条書きの補足（ol,ul のリセットをここだけ戻す） */
+ul.hint {
+  padding-left: 1.2rem;
+  list-style: disc;
+}
+
+ul.hint li + li {
+  margin-top: .35rem;
+}
+
 @media (max-width: 480px) {
   .panel {
     padding: 1rem;
@@ -509,6 +519,13 @@ textarea:focus-visible {
   border: 1px solid var(--success-border);
   background: var(--success-bg);
   color: var(--success-text);
+}
+
+/* ページ側データの上限到達・自己矛盾など（生成はブロックしない注意書き） */
+.message.warn {
+  border: 1px solid var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 /* ----------------------------------------------------------------------------

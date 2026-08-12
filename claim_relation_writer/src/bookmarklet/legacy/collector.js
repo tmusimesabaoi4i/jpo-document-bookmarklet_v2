@@ -56,7 +56,8 @@ try {
   }
 
   // 三色DFS（反復版・巨大入力でも再帰スタックを溢れさせない）で循環を検出し、
-  // 循環している請求項の経路を返す（なければ null）
+  // 循環している請求項の経路を返す（なければ null）。
+  // 罫線ツリー・引用一覧のどちらの解析でも使うため cite.js からも呼ぶ（エクスポート済み）
   function findCycle(nodes, edges) {
     const children = new Map();
     for (const [from, to] of edges) {
@@ -263,7 +264,330 @@ try {
     return { ok: true, claims: [...claims].sort((x, y) => x - y) };
   }
 
-  return { parseClaimTree, parseClaimNumberList };
+  return { parseClaimTree, parseClaimNumberList, findCycle };
+});
+
+/*
+ * cite.js — 「引用一覧」（#claim_cite）テキストを有向グラフに変換する（DOM非依存の純粋モジュール）
+ *
+ * なぜ罫線ツリー（parser.js）ではなくこちらを主データ源にするか:
+ *   ページ側は「全請求項間引用パターン全展開」が上限（5000）に達すると解析を打ち切る。
+ *   このとき #claim_tree の罫線ツリーは**先頭の上限数分しか描画されず、残りが丸ごと欠落**する。
+ *   実例（92請求項）では 92ノード/857エッジのうち 22ノード/100エッジしか残らないが、
+ *   罫線としては正しいため parseClaimTree は成功してしまい、誤ったサマリのまま先へ進む。
+ *   一方 #claim_cite は上限到達時でも全請求項を列挙するため、こちらが唯一信頼できる。
+ *
+ * 解析対象の書式（<br> 改行・<b> 除去後のプレーンテキスト）:
+ *   ★全請求項間引用パターン全展開上限数(5000)到達のため、…★   ← 上限到達時のみ
+ *   合計請求項数: 92  (独立請求項: 1,22,42,43,46,68,89,90)
+ *   [6]請求項6 『・・通信装置』 従属請求項
+ *   　引用請求項: 5 (間接引用: 1,2,3,4)　引用パターンの数: 1
+ *   　被引用請求項: 7,8,9(うち間接被引用: 9)
+ *
+ * 重要な既知の非対称性（実データで検証済み）:
+ *   - 「引用請求項」＝**直接**引用元、「(間接引用: …)」＝間接引用元。上限到達時も完全。
+ *   - 「被引用請求項」＝直接＋間接の全下位。**上限到達時は不完全**（実例で 857 中 219 のみ）。
+ *   したがって**エッジは必ず「引用請求項」（順方向）からのみ構築する**。「被引用請求項」は
+ *   上限に達していない場合のクロスチェックにのみ使う。
+ *   - 「引用パターンの数」も上限到達時は打ち切り後の値。表示以外に使わない。
+ *
+ * グラフの向き: edges の [from, to] は「to が from を引用する」（parser.js と同一規約）。
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && typeof module.exports === 'object') {
+    module.exports = factory(require('./parser'));
+  } else {
+    root.CRW = root.CRW || {};
+    if (!root.CRW.parser) {
+      throw new Error('CRW.parser が読み込まれていません。script の読み込み順を確認してください。');
+    }
+    root.CRW.cite = factory(root.CRW.parser);
+  }
+})(globalThis, function (parser) {
+  'use strict';
+
+  function toHalfWidthDigits(text) {
+    return String(text).replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
+  }
+
+  // 改行コードと、書式を構成する記号の異体字だけを揃える（1:1置換のみ）。
+  // 全角スペース（U+3000）は JS の \s に含まれるため変換不要。
+  function normalizeText(text) {
+    return toHalfWidthDigits(String(text == null ? '' : text).replace(/\r\n?/g, '\n'))
+      .replace(/：/g, ':')
+      .replace(/，/g, '、')
+      .replace(/（/g, '(')
+      .replace(/）/g, ')');
+  }
+
+  // 「1,2, 3」「1、2」などを昇順ユニークな数値配列にする
+  function numList(s) {
+    const out = [];
+    const seen = new Set();
+    for (const part of String(s || '').split(/[^0-9]+/)) {
+      if (part === '') continue;
+      const n = parseInt(part, 10);
+      if (!Number.isInteger(n) || n < 1 || seen.has(n)) continue;
+      seen.add(n);
+      out.push(n);
+    }
+    return out.sort((a, b) => a - b);
+  }
+
+  const uniqueSorted = (arr) => [...new Set(arr)].sort((a, b) => a - b);
+  const setOfEdges = (edges) => new Set(edges.map((e) => e[0] + '>' + e[1]));
+
+  // 「[6]請求項6 …」ブロックの切り出し。次の「[n]請求項」直前まで（最後は文末まで）
+  const BLOCK_RE = /\[(\d+)\][ \t　]*請求項[ \t　]*(\d+)([\s\S]*?)(?=\n[ \t　]*\[\d+\][ \t　]*請求項|$)/g;
+  // 「被引用請求項」は「引用請求項」を部分文字列として含むため否定後読みで区別する
+  const PARENTS_RE = /(?<!被)引用請求項[ \t　]*:[ \t　]*([\d,、\s]+)/;
+  const INDIRECT_PARENTS_RE = /(?<!被)間接引用[ \t　]*:[ \t　]*([\d,、\s]+)/;
+  const CHILDREN_RE = /被引用請求項[ \t　]*:[ \t　]*([\d,、\s]+)/;
+  const INDIRECT_CHILDREN_RE = /間接被引用[ \t　]*:[ \t　]*([\d,、\s]+)/;
+  const PATTERN_COUNT_RE = /引用パターンの数[ \t　]*:[ \t　]*(\d+)/;
+  // 「★全請求項間引用パターン全展開上限数(5000)到達のため、…★」
+  const OVERFLOW_RE = /全展開上限数[ \t　]*\((\d+)\)[ \t　]*到達/;
+
+  /**
+   * 引用一覧テキストを解析する。
+   * @returns {ok:true, graph:{nodes,edges,roots}, meta:{...}, warnings:string[]}
+   *        | {ok:false, errors:[{line:number|null, message:string}]}
+   */
+  function parseClaimCite(text) {
+    const normalized = normalizeText(text);
+    const errors = [];
+    const warnings = [];
+    const addError = (line, message) => errors.push({ line, message });
+
+    if (normalized.trim() === '') {
+      return { ok: false, errors: [{ line: null, message: 'クレーム構造が入力されていません' }] };
+    }
+
+    // 文字位置 → 行番号（エラー表示用）
+    const lineOf = (index) => normalized.slice(0, index).split('\n').length;
+
+    // ---- ヘッダ（最初のブロックより前）から総数・独立請求項・上限到達を読む ----
+    const firstBlock = /\[\d+\][ \t　]*請求項/.exec(normalized);
+    const header = firstBlock ? normalized.slice(0, firstBlock.index) : normalized;
+
+    const overflowM = OVERFLOW_RE.exec(normalized);
+    const overflow = overflowM !== null;
+    const overflowLimit = overflowM ? parseInt(overflowM[1], 10) : null;
+
+    const totalM = /合計請求項数[ \t　]*:[ \t　]*(\d+)/.exec(header);
+    const declaredTotal = totalM ? parseInt(totalM[1], 10) : null;
+    const indepM = /独立請求項[ \t　]*:[ \t　]*([\d,、\s]+)/.exec(header);
+    const declaredRoots = indepM ? numList(indepM[1]) : [];
+
+    // ---- 各請求項ブロックを読む ----
+    const nodes = new Set();
+    const edges = [];
+    const edgeKeys = new Set();
+    const patternCounts = {};
+    const seenClaims = new Set();
+    const revEdges = []; // 「被引用請求項 − うち間接被引用」から作る逆方向エッジ（照合専用）
+    let hasChildrenField = false;
+
+    const addEdge = (from, to) => {
+      const key = from + '>' + to;
+      if (edgeKeys.has(key)) return;
+      edgeKeys.add(key);
+      edges.push([from, to]);
+    };
+
+    BLOCK_RE.lastIndex = 0;
+    let m;
+    while ((m = BLOCK_RE.exec(normalized)) !== null) {
+      const ln = lineOf(m.index);
+      const claim = parseInt(m[2], 10);
+      const body = m[3];
+
+      if (claim < 1) {
+        addError(ln, '請求項番号は1以上の整数にしてください');
+        continue;
+      }
+      if (seenClaims.has(claim)) {
+        warnings.push('請求項' + claim + 'の記載が引用一覧に複数あります（最初の記載を使います）。');
+        continue;
+      }
+      seenClaims.add(claim);
+      nodes.add(claim);
+
+      const parentsM = PARENTS_RE.exec(body);
+      const directParents = parentsM ? numList(parentsM[1]) : [];
+      if (directParents.indexOf(claim) !== -1) {
+        addError(ln, '請求項' + claim + 'が自分自身を引用しています');
+        continue;
+      }
+      for (const p of directParents) {
+        nodes.add(p);
+        addEdge(p, claim);
+      }
+
+      const patternM = PATTERN_COUNT_RE.exec(body);
+      if (patternM) patternCounts[claim] = parseInt(patternM[1], 10);
+
+      // 照合用（エッジ生成には使わない）
+      const childrenM = CHILDREN_RE.exec(body);
+      if (childrenM) {
+        hasChildrenField = true;
+        const indirectChildrenM = INDIRECT_CHILDREN_RE.exec(body);
+        const indirect = new Set(indirectChildrenM ? numList(indirectChildrenM[1]) : []);
+        for (const c of numList(childrenM[1])) {
+          if (!indirect.has(c)) revEdges.push([claim, c]);
+        }
+      }
+      // 「(間接引用: …)」は推移閉包から再計算できるため保持のみ（解析には使わない）
+      INDIRECT_PARENTS_RE.exec(body);
+    }
+
+    if (seenClaims.size === 0) {
+      addError(null,
+        '引用一覧として解釈できませんでした（「[1]請求項1 …」の形式の行が見つかりません）');
+    }
+    if (errors.length > 0) return { ok: false, errors };
+
+    const sortedNodes = [...nodes].sort((a, b) => a - b);
+    const dependentSet = new Set(edges.map((e) => e[1]));
+    const roots = sortedNodes.filter((n) => !dependentSet.has(n));
+
+    const cycle = parser.findCycle(sortedNodes, edges);
+    if (cycle) {
+      return {
+        ok: false,
+        errors: [{ line: null, message: '循環する引用関係が検出されました: 請求項 ' + cycle.join(' → ') }],
+      };
+    }
+
+    // ---- 自己検証（不一致は警告にとどめ、生成はブロックしない） ----
+    const undeclared = sortedNodes.filter((n) => !seenClaims.has(n));
+    if (undeclared.length > 0) {
+      warnings.push(
+        '引用元として現れる請求項' + undeclared.join('、') +
+        'が引用一覧に記載されていません。ページ側の表示を確認してください。'
+      );
+    }
+    if (declaredTotal !== null && declaredTotal !== sortedNodes.length) {
+      warnings.push(
+        'ページ側の合計請求項数（' + declaredTotal + '）と、引用一覧から読み取れた請求項数（' +
+        sortedNodes.length + '）が一致しません。'
+      );
+    }
+    if (declaredRoots.length > 0 && declaredRoots.join(',') !== roots.join(',')) {
+      warnings.push(
+        'ページ側の独立請求項（' + declaredRoots.join('、') +
+        '）と、引用関係から導出した独立請求項（' + (roots.length === 0 ? 'なし' : roots.join('、')) +
+        '）が一致しません。'
+      );
+    }
+    // 逆方向（被引用請求項）との照合は、上限に達していないときだけ意味がある。
+    // 上限到達時の「被引用請求項」は打ち切り後の不完全な値なので照合しない。
+    if (!overflow && hasChildrenField) {
+      const fwd = setOfEdges(edges);
+      const rev = setOfEdges(revEdges);
+      const onlyFwd = [...fwd].filter((e) => !rev.has(e)).length;
+      const onlyRev = [...rev].filter((e) => !fwd.has(e)).length;
+      if (onlyFwd > 0 || onlyRev > 0) {
+        warnings.push(
+          'ページ側の「引用請求項」と「被引用請求項」の内容が一致しません' +
+          '（引用側のみ: ' + onlyFwd + '件、被引用側のみ: ' + onlyRev + '件）。'
+        );
+      }
+    }
+
+    return {
+      ok: true,
+      graph: { nodes: sortedNodes, edges, roots },
+      meta: {
+        overflow,
+        overflowLimit,
+        declaredTotal,
+        declaredRoots: uniqueSorted(declaredRoots),
+        patternCounts,
+      },
+      warnings,
+    };
+  }
+
+  return { parseClaimCite, normalizeText, numList };
+});
+
+/*
+ * structure.js — クレーム構造テキストの書式判定とディスパッチ（DOM非依存の純粋モジュール）
+ *
+ * 本ツールは2種類の入力を受け付ける:
+ *   1. 引用一覧（#claim_cite） … 「合計請求項数: …」「[1]請求項1 …」形式。**推奨**。
+ *      ページ側が引用パターン上限に達しても全請求項が列挙されるため欠落しない。
+ *   2. 罫線ツリー（#claim_tree） … 「1 ┳ 2 ┳ 3」形式。従来からの入力で、手書きにも使える。
+ *      ただしページ側が上限に達すると先頭の上限数分しか描画されず**黙って欠落する**。
+ *
+ * UI 層（ローカル版・ブックマークレット版）はどちらの書式かを意識せず
+ * parseClaimStructure() だけを呼ぶ。戻り値の format で「どちらとして読んだか」を確認できる。
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && typeof module.exports === 'object') {
+    module.exports = factory(require('./parser'), require('./cite'));
+  } else {
+    root.CRW = root.CRW || {};
+    for (const dep of ['parser', 'cite']) {
+      if (!root.CRW[dep]) {
+        throw new Error('CRW.' + dep + ' が読み込まれていません。script の読み込み順を確認してください。');
+      }
+    }
+    root.CRW.structure = factory(root.CRW.parser, root.CRW.cite);
+  }
+})(globalThis, function (parser, cite) {
+  'use strict';
+
+  // 引用一覧に固有の見出し（罫線ツリーには決して現れない）
+  const CITE_MARKERS = [/合計請求項数[ \t　]*[:：]/, /引用請求項[ \t　]*[:：]/, /\[\d+\][ \t　]*請求項[ \t　]*\d+/];
+  const TREE_GLYPHS = /[┳┣┗┃━┬├└│─｜]/;
+
+  /**
+   * 入力テキストの書式を判定する。
+   * @returns {'cite'|'tree'|'unknown'}
+   */
+  function detectFormat(text) {
+    const t = String(text == null ? '' : text);
+    if (t.trim() === '') return 'unknown';
+    // 引用一覧の判定を先に行う。引用一覧に罫線文字が混ざることはないが、
+    // 逆に手書きツリーへ注記として「引用請求項:」と書く可能性は低いため誤判定しにくい。
+    for (const re of CITE_MARKERS) {
+      if (re.test(t)) return 'cite';
+    }
+    if (TREE_GLYPHS.test(t)) return 'tree';
+    return 'unknown';
+  }
+
+  /**
+   * 書式を自動判定して解析する。
+   * @returns {ok:true, graph, format, meta, warnings}
+   *        | {ok:false, errors:[{line,message}], format}
+   */
+  function parseClaimStructure(text) {
+    const format = detectFormat(text);
+    if (format === 'cite') {
+      const result = cite.parseClaimCite(text);
+      return result.ok
+        ? { ok: true, graph: result.graph, format: 'cite', meta: result.meta, warnings: result.warnings }
+        : { ok: false, errors: result.errors, format: 'cite' };
+    }
+    // 'tree' と 'unknown' はどちらも罫線ツリーとして読む（unknown の場合は
+    // parseClaimTree が行番号付きの具体的なエラーを返すので、そちらに委ねる）
+    const result = parser.parseClaimTree(text);
+    return result.ok
+      ? { ok: true, graph: result.graph, format: 'tree', meta: null, warnings: [] }
+      : { ok: false, errors: result.errors, format: format === 'tree' ? 'tree' : 'unknown' };
+  }
+
+  // 収集元・書式を人間向けに1語で表す（ステータス表示用）
+  function formatLabel(format) {
+    if (format === 'cite') return '引用一覧';
+    if (format === 'tree') return '木構造';
+    return '不明';
+  }
+
+  return { detectFormat, parseClaimStructure, formatLabel };
 });
 
 /*
@@ -485,23 +809,30 @@ try {
  */
 (function (root, factory) {
   if (typeof module === 'object' && typeof module.exports === 'object') {
-    module.exports = factory(require('./parser'), require('./resolver'), require('./generator'));
+    module.exports = factory(
+      require('./parser'), require('./resolver'), require('./generator'), require('./structure')
+    );
   } else {
     root.CRW = root.CRW || {};
-    for (const dep of ['parser', 'resolver', 'generator']) {
+    for (const dep of ['parser', 'resolver', 'generator', 'structure']) {
       if (!root.CRW[dep]) {
         throw new Error('CRW.' + dep + ' が読み込まれていません。script の読み込み順を確認してください。');
       }
     }
-    root.CRW.session = factory(root.CRW.parser, root.CRW.resolver, root.CRW.generator);
+    root.CRW.session = factory(root.CRW.parser, root.CRW.resolver, root.CRW.generator, root.CRW.structure);
   }
-})(globalThis, function (parser, resolver, generator) {
+})(globalThis, function (parser, resolver, generator, structure) {
   'use strict';
 
   function createEmptyState() {
     return {
+      // treeText は「貼り付けた／収集した生テキスト」。罫線ツリーでも引用一覧でもよい
+      // （書式は structure.detectFormat が自動判定する）。保存データ互換のため名前は変えない。
       treeText: '',
       graph: null, // 解析済み引用関係（treeText から再計算できるキャッシュ）
+      sourceFormat: null, // 'cite' | 'tree' | null（graph と同じライフサイクル）
+      sourceMeta: null, // 引用一覧のときの付帯情報（上限到達・合計請求項数など）
+      sourceWarnings: [], // ページ側データの自己矛盾など（生成はブロックしない）
       issueType: 'clarity',
       issueClaimsText: '',
       relatedClaimsText: '',
@@ -516,9 +847,29 @@ try {
    */
   function invalidateDownstream(state, changedField) {
     const next = Object.assign({}, state);
-    if (changedField === 'treeText') next.graph = null;
+    if (changedField === 'treeText') {
+      next.graph = null;
+      next.sourceFormat = null;
+      next.sourceMeta = null;
+      next.sourceWarnings = [];
+    }
     next.generatedText = '';
     return next;
+  }
+
+  /**
+   * 状態のテキストを解析し、graph と付帯情報を書き戻す（失敗時は state を変更しない）。
+   * ローカル版・ブックマークレット版の双方から使い、解析結果の格納方法を一元化する。
+   * @returns {ok:true, graph, format, warnings} | {ok:false, errors:[{line,message}]}
+   */
+  function parseIntoState(state) {
+    const parsed = structure.parseClaimStructure(state.treeText);
+    if (!parsed.ok) return { ok: false, errors: parsed.errors, format: parsed.format };
+    state.graph = parsed.graph;
+    state.sourceFormat = parsed.format;
+    state.sourceMeta = parsed.meta;
+    state.sourceWarnings = parsed.warnings || [];
+    return { ok: true, graph: parsed.graph, format: parsed.format, warnings: state.sourceWarnings };
   }
 
   /**
@@ -574,8 +925,7 @@ try {
     if (typeof saved.relatedClaimsText === 'string') state.relatedClaimsText = saved.relatedClaimsText;
 
     if (state.treeText.trim()) {
-      const parsed = parser.parseClaimTree(state.treeText);
-      state.graph = parsed.ok ? parsed.graph : null;
+      parseIntoState(state); // 失敗時は graph=null のまま（下でステップが1にクランプされる）
     }
 
     if (typeof saved.generatedText === 'string' && saved.generatedText !== '' && state.graph) {
@@ -594,14 +944,24 @@ try {
     return state;
   }
 
-  return { createEmptyState, invalidateDownstream, resolveFromState, generateFromState, restoreState };
+  return {
+    createEmptyState, invalidateDownstream, parseIntoState,
+    resolveFromState, generateFromState, restoreState,
+  };
 });
 
 /*
  * collector-app.js — ブックマークレット版のモーダルUI（new/legacy 共通ソース）
  *
- * 「書類比較・クレームチェッカー」のページから罫線ツリー（#claim_tree .div_tree）を
- * 収集し、モーダル上で Step 2〜4（指摘事項・請求項指定・生成・コピー）を完結させる。
+ * 「書類比較・クレームチェッカー」のページからクレーム構造を収集し、モーダル上で
+ * Step 2〜4（指摘事項・請求項指定・生成・コピー）を完結させる。
+ *
+ * 収集元の優先順位（重要）:
+ *   1. 引用一覧 #claim_cite … **既定**。ページ側が引用パターン全展開の上限（5000）に
+ *      達しても全請求項が列挙されるため欠落しない。
+ *   2. 罫線ツリー #claim_tree .div_tree … 引用一覧が空のときのフォールバック。
+ *      上限到達時は先頭の上限数分しか描画されず、罫線としては正しいまま**黙って欠落する**
+ *      （実例: 92請求項が22請求項に化ける）ので、この場合は警告を必ず表示する。
  *
  * 設計原則:
  *   - 実行時のコード評価（eval 系）・ドキュメントへの write 系API・script 要素の挿入を一切使わない
@@ -616,29 +976,36 @@ try {
 (function (root, factory) {
   if (typeof module === 'object' && typeof module.exports === 'object') {
     module.exports = factory(
-      require('../../core/parser'),
       require('../../core/formatter'),
-      require('../../core/session')
+      require('../../core/session'),
+      require('../../core/structure')
     );
   } else {
     root.CRW = root.CRW || {};
-    for (const dep of ['parser', 'formatter', 'resolver', 'generator', 'session']) {
+    for (const dep of ['parser', 'cite', 'structure', 'formatter', 'resolver', 'generator', 'session']) {
       if (!root.CRW[dep]) {
         throw new Error('CRW.' + dep + ' が読み込まれていません。連結順を確認してください。');
       }
     }
-    root.CRW.collectorApp = factory(root.CRW.parser, root.CRW.formatter, root.CRW.session);
+    root.CRW.collectorApp = factory(root.CRW.formatter, root.CRW.session, root.CRW.structure);
   }
-})(globalThis, function (parser, formatter, session) {
+})(globalThis, function (formatter, session, structure) {
   'use strict';
 
-  // 抽出セレクタの優先順。#claim_tree は常駐のデータ保持用（hidden）、
+  // 引用一覧の抽出セレクタ（最優先の収集元）。#claim_cite は「引用一覧」ペインの本体で、
+  // ページ側の解析実行後は常に中身を持つ
+  const CITE_SELECTORS = ['#claim_cite', '#claim_dialog #claim_cite'];
+
+  // 罫線ツリーの抽出セレクタ（フォールバック）。#claim_tree は常駐のデータ保持用（hidden）、
   // #claim_dialog は「木構造」ダイアログ表示中のみ .div_tree を含む
   const TREE_SELECTORS = ['#claim_tree .div_tree', '#claim_dialog .div_tree', '.div_tree'];
 
-  // div_tree の innerHTML をプレーンテキストへ（純関数・Nodeでテスト可能）。
-  // 実ページの中身は「テキスト + <br> 行終端」のみだが、将来の変化に備えて
-  // 残タグ除去と基本エンティティ復元も行う。&amp; の復元は必ず最後。
+  // ページ側が引用パターン上限に達したことを示す要素。到達時に class="hidden" が外れる
+  const OVERFLOW_SELECTORS = ['#claim_warn_overflow', '#claim_kian_overflow'];
+
+  // div_tree / claim_cite の innerHTML をプレーンテキストへ（純関数・Nodeでテスト可能）。
+  // 罫線ツリーの中身は「テキスト + <br> 行終端」のみ、引用一覧は加えて <b> を含むが、
+  // どちらも残タグ除去と基本エンティティ復元で正しく平文化できる。&amp; の復元は必ず最後。
   function treeHtmlToText(html) {
     let t = String(html == null ? '' : html);
     t = t.replace(/<br\s*\/?>/gi, '\n');
@@ -650,20 +1017,65 @@ try {
     return t;
   }
 
-  // ページから木構造テキストを収集する
-  function extractTreeText(doc) {
-    const d = doc || document;
-    for (const selector of TREE_SELECTORS) {
+  // セレクタ群を順に試し、最初に中身のある要素のテキストを返す
+  function firstNonEmpty(d, selectors) {
+    for (const selector of selectors) {
       const nodes = d.querySelectorAll(selector);
       for (const el of nodes) {
         const text = treeHtmlToText(el.innerHTML);
-        if (text.trim() !== '') return { ok: true, text, selector };
+        if (text.trim() !== '') return { text, selector };
       }
     }
+    return null;
+  }
+
+  // ページ側で「引用パターン全展開上限数到達」の警告が表示されているか。
+  // 罫線ツリーへフォールバックしたときだけ必要になる（引用一覧なら本文に★行が含まれる）
+  function pageHasOverflowWarning(doc) {
+    const d = doc || document;
+    for (const selector of OVERFLOW_SELECTORS) {
+      const el = d.querySelector && d.querySelector(selector);
+      if (!el) continue;
+      const hidden = el.className && String(el.className).split(/\s+/).indexOf('hidden') !== -1;
+      if (!hidden && treeHtmlToText(el.innerHTML).trim() !== '') return true;
+    }
+    return false;
+  }
+
+  // ページから木構造テキストを収集する（罫線ツリーのみ。互換のため残す）
+  function extractTreeText(doc) {
+    const d = doc || document;
+    const hit = firstNonEmpty(d, TREE_SELECTORS);
+    if (hit) return { ok: true, text: hit.text, selector: hit.selector };
     return {
       ok: false,
       error: 'クレーム構造が見つかりませんでした。ページ側で「クレーム解析」を実行してから' +
         '「ページから再取得」を押すか、下の欄に木構造を手動で貼り付けてください。',
+    };
+  }
+
+  // ページからクレーム構造を収集する。引用一覧（#claim_cite）を最優先し、
+  // 無ければ罫線ツリーへフォールバックする
+  function extractStructureText(doc) {
+    const d = doc || document;
+    const cite = firstNonEmpty(d, CITE_SELECTORS);
+    if (cite) return { ok: true, text: cite.text, selector: cite.selector, format: 'cite' };
+
+    const tree = firstNonEmpty(d, TREE_SELECTORS);
+    if (tree) {
+      return {
+        ok: true,
+        text: tree.text,
+        selector: tree.selector,
+        format: 'tree',
+        // 上限到達時の罫線ツリーは欠落しているため、フォールバック時のみ判定して伝える
+        truncatedTree: pageHasOverflowWarning(d),
+      };
+    }
+    return {
+      ok: false,
+      error: 'クレーム構造が見つかりませんでした。ページ側で「クレーム解析」を実行してから' +
+        '「ページから再取得」を押すか、下の欄に引用一覧または木構造を手動で貼り付けてください。',
     };
   }
 
@@ -719,7 +1131,7 @@ try {
     '  </div>',
     '  <div id="crw-status" class="crw-msg" hidden></div>',
     '  <details id="crw-tree-details">',
-    '    <summary>収集した木構造（編集できます）</summary>',
+    '    <summary>収集したクレーム構造（編集できます）</summary>',
     '    <textarea id="crw-tree" rows="8" spellcheck="false"></textarea>',
     '    <div class="crw-row">',
     '      <button type="button" id="crw-refetch">ページから再取得</button>',
@@ -820,46 +1232,80 @@ try {
 
     // ---- 陳腐化ガード（ページ側でクレーム解析が再実行された場合） ----
     function markStale() {
-      els.treeWarn.textContent =
-        'ページのクレーム構造が変わりました。「ページから再取得」を押してください。';
-      els.treeWarn.hidden = false;
+      showTreeWarn(['ページのクレーム構造が変わりました。「ページから再取得」を押してください。']);
       els.treeDetails.open = true;
       els.generate.disabled = true;
     }
     function clearStale() {
-      els.treeWarn.hidden = true;
-      els.treeWarn.textContent = '';
+      hideTreeWarn();
       els.generate.disabled = false;
     }
 
+    // ---- データ源の注意書き（上限到達・自己矛盾など） ----
+    function showTreeWarn(messages) {
+      els.treeWarn.textContent = messages.join('\n');
+      els.treeWarn.hidden = false;
+    }
+    function hideTreeWarn() {
+      els.treeWarn.hidden = true;
+      els.treeWarn.textContent = '';
+    }
+
     // ---- 収集と解析 ----
-    function tryParseForSummary() {
-      const parsed = parser.parseClaimTree(state.treeText);
-      if (parsed.ok) {
-        state.graph = parsed.graph;
-        const f = formatter.formatClaimNumbers;
-        setStatus('success',
-          '木構造を収集しました: 請求項 ' + parsed.graph.nodes.length + ' 項' +
-          '（独立請求項: ' + f(parsed.graph.roots) + '）');
-      } else {
+    // 収集元・解析結果から出す注意書きを組み立てる（生成はブロックしない）
+    function collectNotices(res) {
+      const notices = [];
+      if (state.sourceMeta && state.sourceMeta.overflow) {
+        notices.push(
+          'ページ側で引用パターンが上限（' + (state.sourceMeta.overflowLimit || 5000) +
+          '）に達しています。木構造は不完全になるため、引用一覧から解析しました。'
+        );
+      }
+      if (res && res.format === 'tree' && res.truncatedTree) {
+        notices.push(
+          'ページ側で引用パターンが上限に達しており、木構造には一部の請求項しか含まれていません。' +
+          '「引用一覧」を表示してから「ページから再取得」を押すか、引用一覧を下の欄に貼り付けてください。'
+        );
+      }
+      for (const w of state.sourceWarnings || []) notices.push(w);
+      return notices;
+    }
+
+    function tryParseForSummary(res) {
+      const parsed = session.parseIntoState(state);
+      if (!parsed.ok) {
         setStatus('error',
-          '収集した木構造の解析に失敗しました。下の欄で修正してください。\n' +
+          '収集したクレーム構造の解析に失敗しました。下の欄で修正してください。\n' +
           parsed.errors.map((e) => (e.line != null ? e.line + '行目: ' : '') + e.message).join('\n'));
         els.treeDetails.open = true;
+        hideTreeWarn();
+        return;
+      }
+      const f = formatter.formatClaimNumbers;
+      setStatus('success',
+        structure.formatLabel(parsed.format) + 'から収集しました: 請求項 ' +
+        parsed.graph.nodes.length + ' 項（独立請求項: ' + f(parsed.graph.roots) + '）');
+
+      const notices = collectNotices(res);
+      if (notices.length > 0) {
+        showTreeWarn(notices);
+        els.treeDetails.open = true;
+      } else {
+        hideTreeWarn();
       }
     }
 
     function collectFromPage() {
-      // 収集のたびに現行の #claim_tree へ observer を張り直す（起動時に要素が
+      // 収集のたびに現行の #claim_cite / #claim_tree へ observer を張り直す（起動時に要素が
       // 無かった場合や、ページ側で要素ごと差し替えられた場合の検知漏れを防ぐ）
       bindObserver();
-      const res = extractTreeText(doc);
+      const res = extractStructureText(doc);
       if (res.ok) {
         els.tree.value = res.text;
         lastCollectedText = res.text;
         applyUpstreamChange('treeText', res.text);
-        tryParseForSummary();
-        clearStale();
+        els.generate.disabled = false; // 陳腐化フラグの解除（警告表示は tryParse 側が決める）
+        tryParseForSummary(res);
       } else {
         setStatus('error', res.error);
         els.treeDetails.open = true;
@@ -870,7 +1316,7 @@ try {
     function handleRefetch() {
       const current = els.tree.value;
       if (current.trim() !== '' && current !== lastCollectedText) {
-        if (!window.confirm('編集中の木構造を破棄して、ページから取得し直します。よろしいですか？')) return;
+        if (!window.confirm('編集中のクレーム構造を破棄して、ページから取得し直します。よろしいですか？')) return;
       }
       collectFromPage();
     }
@@ -878,13 +1324,19 @@ try {
     // ---- 生成（押下時に明示再解析。generateFromState は自前で解析しないため） ----
     function ensureParsed() {
       if (state.graph) return true;
-      const parsed = parser.parseClaimTree(state.treeText);
+      const parsed = session.parseIntoState(state);
       if (!parsed.ok) {
         showErrors(parsed.errors.map((e) => (e.line != null ? e.line + '行目: ' : '') + e.message));
         els.treeDetails.open = true;
         return false;
       }
-      state.graph = parsed.graph;
+      // 手動編集後は収集元の注意書きを解析結果から出し直す（上限到達の見落とし防止）
+      const notices = collectNotices(null);
+      if (notices.length > 0) {
+        showTreeWarn(notices);
+      } else {
+        hideTreeWarn();
+      }
       return true;
     }
 
@@ -961,17 +1413,18 @@ try {
     }
 
     // ---- ページ側の変化検知（収集のたびに bindObserver で張り直す） ----
-    let observer = null;
+    // 収集元が #claim_cite / #claim_tree のどちらでも陳腐化を検知できるよう両方を監視する
+    let observers = [];
     function bindObserver() {
+      for (const o of observers) o.disconnect();
+      observers = [];
       if (typeof MutationObserver !== 'function') return;
-      if (observer) {
-        observer.disconnect();
-        observer = null;
-      }
-      const claimTreeHost = doc.getElementById('claim_tree');
-      if (claimTreeHost) {
-        observer = new MutationObserver(markStale);
-        observer.observe(claimTreeHost, { childList: true, subtree: true, characterData: true });
+      for (const id of ['claim_cite', 'claim_tree']) {
+        const host = doc.getElementById(id);
+        if (!host) continue;
+        const observer = new MutationObserver(markStale);
+        observer.observe(host, { childList: true, subtree: true, characterData: true });
+        observers.push(observer);
       }
     }
 
@@ -987,7 +1440,8 @@ try {
     }
 
     function close() {
-      if (observer) observer.disconnect();
+      for (const o of observers) o.disconnect();
+      observers = [];
       doc.removeEventListener('keydown', onKeydown, true);
       clearTimeout(feedbackTimer);
       rootEl.remove();
@@ -1024,7 +1478,10 @@ try {
     els.issueClaims.focus();
   }
 
-  return { TREE_SELECTORS, treeHtmlToText, extractTreeText, launch };
+  return {
+    CITE_SELECTORS, TREE_SELECTORS, OVERFLOW_SELECTORS,
+    treeHtmlToText, extractTreeText, extractStructureText, pageHasOverflowWarning, launch,
+  };
 });
 
 globalThis.CRW.collectorApp.launch({"target":"legacy","label":"書類比較・クレームチェッカー（旧版）"});

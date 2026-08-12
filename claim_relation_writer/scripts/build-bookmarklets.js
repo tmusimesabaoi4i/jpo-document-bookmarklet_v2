@@ -20,10 +20,13 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 
-// 連結順はここで一元管理（generator は formatter に、session は parser/resolver/
-// generator に、collector-app は parser/formatter/session に依存する）
+// 連結順はここで一元管理（cite は parser に、structure は parser/cite に、generator は
+// formatter に、session は parser/resolver/generator/structure に、collector-app は
+// formatter/session/structure に依存する）
 const SOURCE_ORDER = [
   'src/core/parser.js',
+  'src/core/cite.js',
+  'src/core/structure.js',
   'src/core/formatter.js',
   'src/core/resolver.js',
   'src/core/generator.js',

@@ -22,13 +22,19 @@
 
   <section class="panel" id="panel-1" aria-labelledby="h-step1">
     <h2 id="h-step1">Step 1: クレーム構造を入力</h2>
-    <p class="hint">罫線文字（┳ ┣ ┃ ┗ ━）で書いたクレームツリーを貼り付けてください。半角・全角スペースやタブが混在していても解析できます。上のステップ表示をクリックすると画面が切り替わります（Step 2 以降へ移るときに自動で解析されます）。</p>
+    <p class="hint">次のどちらの書式でも貼り付けられます（自動判別されます）。上のステップ表示をクリックすると画面が切り替わります（Step 2 以降へ移るときに自動で解析されます）。</p>
+    <ul class="hint">
+      <li><strong>引用一覧</strong>（推奨）… 「書類比較・クレームチェッカー」の<strong>引用一覧</strong>をそのまま貼り付けます。「合計請求項数: …」「[1]請求項1 …」で始まる書式です。ページ側が引用パターンの展開上限に達した場合でも、全請求項が欠落なく解析できます。</li>
+      <li><strong>木構造</strong> … 罫線文字（┳ ┣ ┃ ┗ ━）で書いたクレームツリー。半角・全角スペースやタブが混在していても解析できます。<strong>ページ側が展開上限に達した場合、木構造には一部の請求項しか含まれない</strong>ため、その場合は引用一覧を使ってください。</li>
+    </ul>
     <div class="sample-row">
       <button type="button" id="load-sample" class="secondary">サンプル（木構造1）を読み込む</button>
+      <button type="button" id="load-sample-cite" class="secondary">サンプル（引用一覧）を読み込む</button>
     </div>
     <textarea id="tree-input" class="tree-input" rows="14" spellcheck="false"
       placeholder="  1 ┳  2 ━  3&#10;    ┣  4&#10;    ┗  5&#10;  6"></textarea>
     <div id="parse-errors" class="message error" hidden></div>
+    <div id="source-warnings" class="message warn" hidden></div>
   </section>
 
   <section class="panel" id="panel-2" aria-labelledby="h-step2" hidden>
@@ -89,6 +95,8 @@
 </footer>
 
 <script src="../core/parser.js"></script>
+<script src="../core/cite.js"></script>
+<script src="../core/structure.js"></script>
 <script src="../core/formatter.js"></script>
 <script src="../core/resolver.js"></script>
 <script src="../core/generator.js"></script>

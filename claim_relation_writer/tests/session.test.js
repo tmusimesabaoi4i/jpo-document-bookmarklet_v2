@@ -21,12 +21,76 @@ test('createEmptyState: 既定値', () => {
   assert.deepEqual(session.createEmptyState(), {
     treeText: '',
     graph: null,
+    sourceFormat: null,
+    sourceMeta: null,
+    sourceWarnings: [],
     issueType: 'clarity',
     issueClaimsText: '',
     relatedClaimsText: '',
     generatedText: '',
     currentStep: 1,
   });
+});
+
+test('parseIntoState: 書式を自動判別して graph と収集元情報を書き込む', () => {
+  // 木構造
+  const treeState = session.createEmptyState();
+  treeState.treeText = examples.trees.tree6.text;
+  const treeResult = session.parseIntoState(treeState);
+  assert.equal(treeResult.ok, true);
+  assert.equal(treeResult.format, 'tree');
+  assert.equal(treeState.sourceFormat, 'tree');
+  assert.equal(treeState.sourceMeta, null);
+  assert.deepEqual(treeState.graph.roots, [1, 13, 22, 23, 24]);
+
+  // 引用一覧（同一案件なので同じグラフになる）
+  const citeState = session.createEmptyState();
+  citeState.treeText = examples.cites.cite1.text;
+  const citeResult = session.parseIntoState(citeState);
+  assert.equal(citeResult.ok, true);
+  assert.equal(citeResult.format, 'cite');
+  assert.equal(citeState.sourceFormat, 'cite');
+  assert.equal(citeState.sourceMeta.declaredTotal, 24);
+  assert.equal(citeState.sourceMeta.overflow, false);
+  assert.deepEqual(citeState.sourceWarnings, []);
+  assert.deepEqual(citeState.graph.nodes, treeState.graph.nodes);
+  assert.deepEqual(citeState.graph.roots, treeState.graph.roots);
+
+  // 失敗時は state を書き換えない
+  const badState = session.createEmptyState();
+  badState.treeText = 'あいうえお';
+  const badResult = session.parseIntoState(badState);
+  assert.equal(badResult.ok, false);
+  assert.equal(badState.graph, null);
+  assert.equal(badState.sourceFormat, null);
+});
+
+test('invalidateDownstream: 構造の変更で収集元情報も一緒に捨てる', () => {
+  const state = session.createEmptyState();
+  state.treeText = examples.cites.cite1.text;
+  session.parseIntoState(state);
+  assert.ok(state.sourceMeta);
+
+  const next = session.invalidateDownstream(
+    Object.assign({}, state, { treeText: '1 ━ 2' }), 'treeText'
+  );
+  assert.equal(next.graph, null);
+  assert.equal(next.sourceFormat, null);
+  assert.equal(next.sourceMeta, null);
+  assert.deepEqual(next.sourceWarnings, []);
+});
+
+test('restoreState: 引用一覧で保存された構造も書式判別して復元される', () => {
+  const restored = session.restoreState({
+    treeText: examples.cites.cite1.text,
+    issueType: 'clarity',
+    issueClaimsText: '2',
+    relatedClaimsText: '',
+    currentStep: 3,
+  });
+  assert.equal(restored.sourceFormat, 'cite');
+  assert.deepEqual(restored.graph.roots, [1, 13, 22, 23, 24]);
+  assert.equal(restored.currentStep, 3);
 });
 
 test('generateFromState: ゴールデン提示例1と一致', () => {

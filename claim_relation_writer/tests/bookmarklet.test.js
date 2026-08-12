@@ -6,6 +6,7 @@ const path = require('node:path');
 const build = require('../scripts/build-bookmarklets');
 const collectorApp = require('../src/bookmarklet/common/collector-app');
 const parser = require('../src/core/parser');
+const structure = require('../src/core/structure');
 const examples = require('../examples/examples');
 
 const ROOT = path.join(__dirname, '..');
@@ -63,7 +64,10 @@ test('連結スモーク: コア+app を連結順どおり評価すると CRW.* 
   // globalThis.CRW に登録される（連結順ミスは各UMDの依存ガードが throw して検出される）
   const run = new Function(src + '\nreturn globalThis.CRW;');
   const CRW = run();
-  for (const m of ['parser', 'formatter', 'resolver', 'generator', 'session', 'collectorApp']) {
+  const modules = [
+    'parser', 'cite', 'structure', 'formatter', 'resolver', 'generator', 'session', 'collectorApp',
+  ];
+  for (const m of modules) {
     assert.ok(CRW && CRW[m], 'CRW.' + m + ' が登録されていない');
   }
 });
@@ -72,6 +76,10 @@ test('SOURCE_ORDER: 依存が前に来る順序になっている', () => {
   const order = build.SOURCE_ORDER.map((p) => path.basename(p));
   const idx = (name) => order.indexOf(name);
   assert.ok(idx('formatter.js') < idx('generator.js'));
+  assert.ok(idx('parser.js') < idx('cite.js'));
+  assert.ok(idx('cite.js') < idx('structure.js'));
+  assert.ok(idx('parser.js') < idx('structure.js'));
+  assert.ok(idx('structure.js') < idx('session.js'));
   assert.ok(idx('parser.js') < idx('session.js'));
   assert.ok(idx('resolver.js') < idx('session.js'));
   assert.ok(idx('generator.js') < idx('session.js'));
@@ -148,4 +156,90 @@ test('TREE_SELECTORS: #claim_tree 起点が最優先で汎用クラス単独は�
     '#claim_dialog .div_tree',
     '.div_tree',
   ]);
+  assert.deepEqual(collectorApp.CITE_SELECTORS, ['#claim_cite', '#claim_dialog #claim_cite']);
+});
+
+// ---------------------------------------------------------------------------
+// extractStructureText: 引用一覧を最優先で収集する（引用パターン上限到達対策の要）
+// ---------------------------------------------------------------------------
+
+const el = (html) => ({ innerHTML: html });
+const docStub = (map, single) => ({
+  querySelectorAll: (sel) => map[sel] || [],
+  querySelector: (sel) => (single && single[sel]) || (map[sel] && map[sel][0]) || null,
+});
+
+test('extractStructureText: 引用一覧があれば木構造より優先する', () => {
+  const r = collectorApp.extractStructureText(docStub({
+    '#claim_cite': [el('[1]請求項1 独立請求項<br>')],
+    '#claim_tree .div_tree': [el('1 ━ 2 <br>')],
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(r.format, 'cite');
+  assert.equal(r.selector, '#claim_cite');
+  assert.equal(r.text, '[1]請求項1 独立請求項\n');
+});
+
+test('extractStructureText: 引用一覧が空なら木構造へフォールバックする', () => {
+  const r = collectorApp.extractStructureText(docStub({
+    '#claim_cite': [el('  <br> ')],
+    '#claim_tree .div_tree': [el('1 ━ 2 <br>')],
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(r.format, 'tree');
+  assert.equal(r.selector, '#claim_tree .div_tree');
+  assert.equal(r.truncatedTree, false);
+});
+
+test('extractStructureText: 木構造フォールバック時に上限到達を検出して伝える', () => {
+  const overflowEl = el('★全請求項間引用パターン全展開上限数(5000)到達のため、…★<br>');
+  overflowEl.className = ''; // ページ側は到達時に hidden クラスを外す
+  const r = collectorApp.extractStructureText(docStub(
+    { '#claim_tree .div_tree': [el('1 ━ 2 <br>')] },
+    { '#claim_warn_overflow': overflowEl }
+  ));
+  assert.equal(r.ok, true);
+  assert.equal(r.format, 'tree');
+  assert.equal(r.truncatedTree, true, '上限到達を検出できていない（黙って欠落する）');
+});
+
+test('pageHasOverflowWarning: hidden クラス付き・空要素は到達扱いにしない', () => {
+  const hiddenEl = el('★…上限数(5000)到達…★');
+  hiddenEl.className = 'hidden';
+  assert.equal(
+    collectorApp.pageHasOverflowWarning(docStub({}, { '#claim_warn_overflow': hiddenEl })),
+    false
+  );
+  const emptyEl = el('');
+  emptyEl.className = '';
+  assert.equal(
+    collectorApp.pageHasOverflowWarning(docStub({}, { '#claim_warn_overflow': emptyEl })),
+    false
+  );
+  assert.equal(collectorApp.pageHasOverflowWarning(docStub({})), false);
+});
+
+test('extractStructureText: 全滅時は引用一覧の手貼りも案内する', () => {
+  const r = collectorApp.extractStructureText(docStub({}));
+  assert.equal(r.ok, false);
+  assert.ok(r.error.includes('引用一覧'));
+  assert.ok(r.error.includes('手動で貼り付け'));
+});
+
+test('実ページ: 上限到達スナップショットから引用一覧が選ばれ92項すべて解析できる', () => {
+  const file = path.join(
+    ROOT, '..', 'fixtures', 'claim-checker', 'new',
+    '書類比較・クレームチェッカー_引用パターン上限到達.html'
+  );
+  const html = fs.readFileSync(file, 'utf8');
+  const citeM = /<div[^>]*id="claim_cite"[^>]*>([\s\S]*?)<\/div>/.exec(html);
+  assert.ok(citeM, '#claim_cite が見つからない');
+  const text = collectorApp.treeHtmlToText(citeM[1]);
+
+  const parsed = structure.parseClaimStructure(text);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.format, 'cite');
+  assert.equal(parsed.graph.nodes.length, 92);
+  assert.deepEqual(parsed.graph.roots, [1, 22, 42, 43, 46, 68, 89, 90]);
+  assert.equal(parsed.meta.overflow, true);
 });

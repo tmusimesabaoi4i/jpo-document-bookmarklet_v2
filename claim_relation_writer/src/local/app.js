@@ -22,7 +22,9 @@
   'use strict';
 
   const CRW = globalThis.CRW || {};
-  const REQUIRED_MODULES = ['parser', 'formatter', 'resolver', 'generator', 'session', 'examples'];
+  const REQUIRED_MODULES = [
+    'parser', 'cite', 'structure', 'formatter', 'resolver', 'generator', 'session', 'examples',
+  ];
 
   const STORAGE_KEY = 'crw.state';
   const SCHEMA_VERSION = 1;
@@ -132,22 +134,44 @@
 
   // ---------- ステップ切替（上部インジケータのクリックで画面遷移） ----------
 
-  // クレーム構造が未解析なら解析する。失敗したらエラーを表示して false を返す
+  // クレーム構造が未解析なら解析する。失敗したらエラーを表示して false を返す。
+  // 入力が罫線ツリーか引用一覧かは CRW.structure が自動判別する
   function ensureParsed() {
     if (state.graph) return true;
     hideMessage(els.parseErrors);
-    const result = CRW.parser.parseClaimTree(state.treeText);
+    const result = CRW.session.parseIntoState(state);
     if (!result.ok) {
       showMessages(
         els.parseErrors,
         result.errors.map((e) => (e.line != null ? e.line + '行目: ' : '') + e.message)
       );
+      renderSourceWarnings();
       return false;
     }
-    state.graph = result.graph;
-    renderParseSummary(result.graph);
+    renderParseSummary(state.graph);
+    renderSourceWarnings();
     persist();
     return true;
+  }
+
+  // ページ側データ由来の注意書き（引用パターン上限到達・独立請求項の不一致など）。
+  // 解析自体は成功しているので生成はブロックせず、注意書きとして併記する
+  function renderSourceWarnings() {
+    const messages = [];
+    const meta = state.sourceMeta;
+    if (meta && meta.overflow) {
+      messages.push(
+        'ページ側で引用パターンが上限（' + (meta.overflowLimit || 5000) +
+        '）に達しています。この場合、木構造には一部の請求項しか含まれません' +
+        '（この引用一覧からは全請求項を解析できています）。'
+      );
+    }
+    for (const w of state.sourceWarnings || []) messages.push(w);
+    if (messages.length === 0) {
+      hideMessage(els.sourceWarnings);
+      return;
+    }
+    showMessages(els.sourceWarnings, messages);
   }
 
   function goToStep(n) {
@@ -175,6 +199,7 @@
     applyUpstreamChange('treeText', els.treeInput.value);
     hideMessage(els.parseErrors);
     hideMessage(els.parseSummary);
+    hideMessage(els.sourceWarnings);
     persistSoon();
   }
 
@@ -182,7 +207,8 @@
     const f = CRW.formatter.formatClaimNumbers;
     showMessages(
       els.parseSummary,
-      '請求項 ' + graph.nodes.length + ' 項を解析しました。独立請求項: ' + f(graph.roots)
+      CRW.structure.formatLabel(state.sourceFormat) + 'として請求項 ' + graph.nodes.length +
+      ' 項を解析しました。独立請求項: ' + f(graph.roots)
     );
     els.relationsPre.textContent = relationsPreview(graph);
   }
@@ -203,14 +229,23 @@
       .join('\n');
   }
 
-  function handleLoadSample() {
-    const tree = CRW.examples.trees.tree1;
-    if (!tree) return;
-    if (state.treeText.trim() && state.treeText !== tree.text) {
+  function loadSampleText(text) {
+    if (!text) return;
+    if (state.treeText.trim() && state.treeText !== text) {
       if (!window.confirm('入力欄の内容をサンプルで置き換えます。よろしいですか？')) return;
     }
-    els.treeInput.value = tree.text;
+    els.treeInput.value = text;
     onTreeTextChanged();
+  }
+
+  function handleLoadSample() {
+    const tree = CRW.examples.trees.tree1;
+    if (tree) loadSampleText(tree.text);
+  }
+
+  function handleLoadSampleCite() {
+    const cite = CRW.examples.cites && CRW.examples.cites.cite1;
+    if (cite) loadSampleText(cite.text);
   }
 
   // ---------- Step 3: 請求項指定 ----------
@@ -311,6 +346,7 @@
     syncUIFromState();
     hideMessage(els.parseErrors);
     hideMessage(els.parseSummary);
+    hideMessage(els.sourceWarnings);
     clearResultUI();
     goToStep(1);
   }
@@ -336,6 +372,7 @@
     });
     if (state.graph) {
       renderParseSummary(state.graph);
+      renderSourceWarnings();
       // 生成文が復元された場合（= 現在の入力との一致を session が検証済み）のみ内訳も再構築
       if (state.generatedText) {
         const res = CRW.session.resolveFromState(state);
@@ -367,6 +404,7 @@
     }
     els.treeInput.addEventListener('input', onTreeTextChanged);
     els.loadSample.addEventListener('click', handleLoadSample);
+    els.loadSampleCite.addEventListener('click', handleLoadSampleCite);
     els.generate.addEventListener('click', handleGenerate);
     els.copyResult.addEventListener('click', handleCopy);
     els.resetAll.addEventListener('click', handleReset);
@@ -405,9 +443,11 @@
       els['stepBtn' + i] = $('step-btn-' + i);
     }
     els.loadSample = $('load-sample');
+    els.loadSampleCite = $('load-sample-cite');
     els.treeInput = $('tree-input');
     els.parseErrors = $('parse-errors');
     els.parseSummary = $('parse-summary');
+    els.sourceWarnings = $('source-warnings');
     els.relationsPre = $('relations-pre');
     els.claimsHint = $('claims-hint');
     els.issueClaims = $('issue-claims');

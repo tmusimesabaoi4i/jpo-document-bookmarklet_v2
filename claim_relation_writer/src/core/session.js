@@ -11,23 +11,30 @@
  */
 (function (root, factory) {
   if (typeof module === 'object' && typeof module.exports === 'object') {
-    module.exports = factory(require('./parser'), require('./resolver'), require('./generator'));
+    module.exports = factory(
+      require('./parser'), require('./resolver'), require('./generator'), require('./structure')
+    );
   } else {
     root.CRW = root.CRW || {};
-    for (const dep of ['parser', 'resolver', 'generator']) {
+    for (const dep of ['parser', 'resolver', 'generator', 'structure']) {
       if (!root.CRW[dep]) {
         throw new Error('CRW.' + dep + ' が読み込まれていません。script の読み込み順を確認してください。');
       }
     }
-    root.CRW.session = factory(root.CRW.parser, root.CRW.resolver, root.CRW.generator);
+    root.CRW.session = factory(root.CRW.parser, root.CRW.resolver, root.CRW.generator, root.CRW.structure);
   }
-})(globalThis, function (parser, resolver, generator) {
+})(globalThis, function (parser, resolver, generator, structure) {
   'use strict';
 
   function createEmptyState() {
     return {
+      // treeText は「貼り付けた／収集した生テキスト」。罫線ツリーでも引用一覧でもよい
+      // （書式は structure.detectFormat が自動判定する）。保存データ互換のため名前は変えない。
       treeText: '',
       graph: null, // 解析済み引用関係（treeText から再計算できるキャッシュ）
+      sourceFormat: null, // 'cite' | 'tree' | null（graph と同じライフサイクル）
+      sourceMeta: null, // 引用一覧のときの付帯情報（上限到達・合計請求項数など）
+      sourceWarnings: [], // ページ側データの自己矛盾など（生成はブロックしない）
       issueType: 'clarity',
       issueClaimsText: '',
       relatedClaimsText: '',
@@ -42,9 +49,29 @@
    */
   function invalidateDownstream(state, changedField) {
     const next = Object.assign({}, state);
-    if (changedField === 'treeText') next.graph = null;
+    if (changedField === 'treeText') {
+      next.graph = null;
+      next.sourceFormat = null;
+      next.sourceMeta = null;
+      next.sourceWarnings = [];
+    }
     next.generatedText = '';
     return next;
+  }
+
+  /**
+   * 状態のテキストを解析し、graph と付帯情報を書き戻す（失敗時は state を変更しない）。
+   * ローカル版・ブックマークレット版の双方から使い、解析結果の格納方法を一元化する。
+   * @returns {ok:true, graph, format, warnings} | {ok:false, errors:[{line,message}]}
+   */
+  function parseIntoState(state) {
+    const parsed = structure.parseClaimStructure(state.treeText);
+    if (!parsed.ok) return { ok: false, errors: parsed.errors, format: parsed.format };
+    state.graph = parsed.graph;
+    state.sourceFormat = parsed.format;
+    state.sourceMeta = parsed.meta;
+    state.sourceWarnings = parsed.warnings || [];
+    return { ok: true, graph: parsed.graph, format: parsed.format, warnings: state.sourceWarnings };
   }
 
   /**
@@ -100,8 +127,7 @@
     if (typeof saved.relatedClaimsText === 'string') state.relatedClaimsText = saved.relatedClaimsText;
 
     if (state.treeText.trim()) {
-      const parsed = parser.parseClaimTree(state.treeText);
-      state.graph = parsed.ok ? parsed.graph : null;
+      parseIntoState(state); // 失敗時は graph=null のまま（下でステップが1にクランプされる）
     }
 
     if (typeof saved.generatedText === 'string' && saved.generatedText !== '' && state.graph) {
@@ -120,5 +146,8 @@
     return state;
   }
 
-  return { createEmptyState, invalidateDownstream, resolveFromState, generateFromState, restoreState };
+  return {
+    createEmptyState, invalidateDownstream, parseIntoState,
+    resolveFromState, generateFromState, restoreState,
+  };
 });

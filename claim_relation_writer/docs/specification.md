@@ -52,6 +52,70 @@
 
 また、同一番号が行頭に再掲されても、新しい独立請求項としては扱われません。独立請求項の判定は「一度も子として現れないこと」によって行うため（「4. グラフモデル」参照）、行頭への再掲の有無に影響されません。
 
+### 1.5 引用一覧の入力記法（`cite.js`）— 推奨の入力形式
+
+罫線ツリーに加えて、「書類比較・クレームチェッカー」の**引用一覧**（ページ側の `#claim_cite`）をそのまま入力できます。書式は `structure.detectFormat` が自動判別します（「11.1 コアモジュール」参照）。
+
+```
+★全請求項間引用パターン全展開上限数(5000)到達のため、上限数の引用パターンについて解析します。★   ← 上限到達時のみ
+
+合計請求項数: 92  (独立請求項: 1,22,42,43,46,68,89,90)
+
+[6]請求項6 『・・通信装置』 従属請求項
+　引用請求項: 5 (間接引用: 1,2,3,4)　引用パターンの数: 1
+　被引用請求項: 7,8,9(うち間接被引用: 9)
+```
+
+#### 各欄の意味と使い方
+
+| 欄 | 意味 | 本ツールでの扱い |
+| --- | --- | --- |
+| `引用請求項` | **直接**の引用元 | **辺の生成に使う唯一の情報源**。`[引用請求項, 当該請求項]` の辺を張る |
+| `(間接引用: …)` | 間接の引用元 | 使わない（グラフの推移閉包から導けるため） |
+| `被引用請求項` | 直接＋間接の全下位 | **辺の生成には使わない**（後述）。上限未到達時のみ整合チェックに使う |
+| `(うち間接被引用: …)` | 上記のうち間接の分 | 同上（`被引用請求項 − うち間接被引用` ＝ 直接下位） |
+| `引用パターンの数` | 展開されたパターン数 | 使わない（上限到達時は打ち切り後の値になるため） |
+| `合計請求項数` | ページ側が数えた総数 | 解析結果との照合（不一致は警告） |
+| `独立請求項` | ページ側が判定した独立請求項 | 導出した独立請求項との照合（不一致は警告） |
+
+#### なぜ引用一覧を優先するのか（引用パターン上限到達）
+
+ページ側は「全請求項間引用パターン全展開」が上限（5000）に達すると解析を打ち切り、冒頭に ★ の警告行を出します。このとき **`#claim_tree` の罫線ツリーは先頭の上限数分しか描画されず、残りが丸ごと欠落します**。
+
+`fixtures/claim-checker/new/書類比較・クレームチェッカー_引用パターン上限到達.html`（92請求項）での実測:
+
+| | 実際 | 打ち切られた木構造から得られるもの |
+| --- | --- | --- |
+| 請求項ノード | 92 | 22（1–21, 44 のみ） |
+| 直接引用エッジ | 857 | 100 |
+| 独立請求項 | 1, 22, 42, 43, 46, 68, 89, 90 | 1 のみ |
+
+欠落しても罫線としては正しいため `parseClaimTree` は成功してしまい、誤ったサマリのまま先へ進みます（症状としては、指摘する請求項に 50 を入れると `resolver.js` が「請求項50は入力されたクレーム構造に存在しません」を返す）。一方、引用一覧の `引用請求項` は上限到達時でも完全です。
+
+**`被引用請求項` を辺の生成に使わない理由**: 同じ引用一覧でも `被引用請求項` は打ち切り後の不完全な値で、上記の実測では逆方向から復元できる辺が 857 本中 219 本しかありませんでした。したがって辺は必ず順方向（`引用請求項`）から作り、`被引用請求項` は上限に達していないときの整合チェックにのみ使います（`tests/cite.test.js` でこの 219 / 857 の差を回帰テストとして固定しています）。
+
+#### 正規化
+
+改行コード（CRLF/CR → LF）に加えて、全角数字 → 半角、`：` → `:`、`，` → `、`、`（` `）` → `(` `)` の1:1置換のみを行います。全角スペース U+3000 は JavaScript の `\s` に含まれるため変換不要です。
+
+#### 検証と警告
+
+解析後、以下を検査します。**エラー**は解析を失敗させ、**警告**は解析を成功させたうえで注意書きとして表示します（生成はブロックしません）。
+
+| 種別 | 内容 |
+| --- | --- |
+| エラー | 入力が空／`[n]請求項n` 形式のブロックが1つも無い |
+| エラー | 自己引用（`引用請求項` に自分自身が含まれる） |
+| エラー | 循環する引用関係（`parser.findCycle` を再利用。経路付きで報告） |
+| 警告 | 引用元として現れる請求項が引用一覧に記載されていない |
+| 警告 | `合計請求項数` と解析できた請求項数が不一致 |
+| 警告 | `独立請求項` と導出した独立請求項が不一致 |
+| 警告 | `引用請求項` と `被引用請求項` が不一致（**上限未到達時のみ検査**） |
+
+#### 木構造との等価性
+
+上限に達していないページでは、引用一覧から作ったグラフと罫線ツリーから作ったグラフは**完全に一致します**。`tests/cite.test.js` で、実ページスナップショット（24請求項）とサンプル `cite1` / `tree6` の両方について、ノード・辺・独立請求項の完全一致を検証しています。この等価性が、引用一覧を主データ源に採用できる根拠です。
+
 ## 2. 請求項番号リストの記法（Step 3 の入力）
 
 Step 3 の「指摘する請求項」「関連する請求項」欄は `parseClaimNumberList(text)` で解析します。クレームツリーとは別の、単純な番号リストの記法です。
@@ -345,7 +409,7 @@ lines.push('　よって、請求項' + f(resolved.allAffectedClaims) + type.con
 
 ### 11.1 コアモジュール（`src/core/`）
 
-`parser.js`・`resolver.js`・`formatter.js`・`generator.js`・`session.js` の5つは、いずれもDOMに依存しない純粋なJavaScriptで、次のUMD（Universal Module Definition）パターンで書かれています。
+`parser.js`・`cite.js`・`structure.js`・`resolver.js`・`formatter.js`・`generator.js`・`session.js` の7つは、いずれもDOMに依存しない純粋なJavaScriptで、次のUMD（Universal Module Definition）パターンで書かれています。
 
 ```js
 (function (root, factory) {
@@ -371,18 +435,31 @@ if (!root.CRW.formatter) {
 }
 ```
 
-`session.js` は「アプリ状態の整合性」を担うモジュールです（`parser`・`resolver`・`generator` に依存）。UIから独立して次を提供します。
+`cite.js` は「引用一覧」（ページ側の `#claim_cite`）を有向グラフに変換するモジュールです（`parser.findCycle` に依存）。詳細は「1.5 引用一覧の入力記法」を参照してください。
 
-- `invalidateDownstream(state, changedField)`: 上流入力（クレーム構造・指摘事項・請求項指定）が変更されたとき、生成済み文章（構造変更時は解析結果も）を無効化した新しい状態を返します。**古い生成文が「現在の結果」としてコピー可能なまま残ることを防ぐ**、本ツールで最も重要な安全規則です。
+`structure.js` は入力テキストの書式（引用一覧／木構造）を自動判別し、`cite.parseClaimCite` または `parser.parseClaimTree` へ振り分ける薄いディスパッチャです（`parser`・`cite` に依存）。UI層はこの `parseClaimStructure(text)` だけを呼びます。判定規則は次のとおりです。
+
+| 条件（上から順に評価） | 判定 |
+| --- | --- |
+| `合計請求項数:` / `引用請求項:` / `[n]請求項n` のいずれかを含む | `'cite'` |
+| 罫線文字 `┳ ┣ ┗ ┃ ━ ┬ ├ └ │ ─ ｜` を含む | `'tree'` |
+| 上記以外（空文字を含む） | `'unknown'`（罫線ツリーとして読み、`parseClaimTree` の行番号付きエラーを返す） |
+
+`session.js` は「アプリ状態の整合性」を担うモジュールです（`parser`・`resolver`・`generator`・`structure` に依存）。UIから独立して次を提供します。
+
+- `invalidateDownstream(state, changedField)`: 上流入力（クレーム構造・指摘事項・請求項指定）が変更されたとき、生成済み文章（構造変更時は解析結果・収集元情報も）を無効化した新しい状態を返します。**古い生成文が「現在の結果」としてコピー可能なまま残ることを防ぐ**、本ツールで最も重要な安全規則です。
+- `parseIntoState(state)`: `state.treeText` を書式自動判別で解析し、`graph`・`sourceFormat`（`'cite' | 'tree'`）・`sourceMeta`・`sourceWarnings` を書き戻します。失敗時は state を変更しません。ローカル版・ブックマークレット版の双方がこれを使うため、解析結果の格納方法が一元化されます。
 - `resolveFromState(state)` / `generateFromState(state)`: 状態オブジェクトから影響範囲の計算・文章生成までを一括で行います。
 - `restoreState(saved)`: localStorage の保存データから安全な状態を復元します（型検証・`treeText` の再解析・生成文の再生成照合・ステップの補正）。
 
 ### 11.2 ローカル版UI（`src/local/`）
 
-- `index.html`: 4ステップのウィザードUI。スクリプトは次の順で読み込みます（`generator.js` が `formatter.js` に、`session.js` が `parser.js`・`resolver.js`・`generator.js` に依存するため、この順序が必須です）。
+- `index.html`: 4ステップのウィザードUI。スクリプトは次の順で読み込みます（`cite.js` が `parser.js` に、`structure.js` が `parser.js`・`cite.js` に、`generator.js` が `formatter.js` に、`session.js` が `parser.js`・`resolver.js`・`generator.js`・`structure.js` に依存するため、この順序が必須です）。
 
   ```html
   <script src="../core/parser.js"></script>
+  <script src="../core/cite.js"></script>
+  <script src="../core/structure.js"></script>
   <script src="../core/formatter.js"></script>
   <script src="../core/resolver.js"></script>
   <script src="../core/generator.js"></script>
@@ -391,7 +468,7 @@ if (!root.CRW.formatter) {
   <script src="app.js"></script>
   ```
 
-- `app.js`: 画面遷移・入力欄の管理・localStorageへの保存/復元・クリップボードへのコピーのみを担当します。クレーム解析・影響範囲計算・文章生成・状態の整合性管理は行わず、すべて `CRW.parser` / `CRW.resolver` / `CRW.generator` / `CRW.formatter` / `CRW.session` に委譲します。上流入力の変更時は必ず `CRW.session.invalidateDownstream` を通し、結果表示とコピーボタンも同時に無効化します。起動時に `REQUIRED_MODULES`（`parser`・`formatter`・`resolver`・`generator`・`session`・`examples`）が揃っているかを確認し、不足があれば画面上部にエラーを表示します。
+- `app.js`: 画面遷移・入力欄の管理・localStorageへの保存/復元・クリップボードへのコピーのみを担当します。クレーム解析・影響範囲計算・文章生成・状態の整合性管理は行わず、すべて `CRW.*` のコアモジュールに委譲します（解析は `CRW.session.parseIntoState` 経由で行い、書式判別は `CRW.structure` に任せます）。上流入力の変更時は必ず `CRW.session.invalidateDownstream` を通し、結果表示とコピーボタンも同時に無効化します。Step 1 の解析サマリには収集元の書式（「引用一覧として請求項 92 項を解析しました」など）を表示し、`sourceMeta.overflow` や `sourceWarnings` があれば警告欄に併記します。起動時に `REQUIRED_MODULES`（`parser`・`cite`・`structure`・`formatter`・`resolver`・`generator`・`session`・`examples`）が揃っているかを確認し、不足があれば画面上部にエラーを表示します。
 - `style.css`: 見た目のスタイル定義。
 
 ### 11.3 ブックマークレット版（`src/bookmarklet/`）（実装済み）
@@ -432,6 +509,8 @@ src/bookmarklet/
 ```js
 const SOURCE_ORDER = [
   'src/core/parser.js',
+  'src/core/cite.js',
+  'src/core/structure.js',
   'src/core/formatter.js',
   'src/core/resolver.js',
   'src/core/generator.js',
@@ -440,7 +519,7 @@ const SOURCE_ORDER = [
 ];
 ```
 
-依存の向き（`generator` は `formatter` に、`session` は `parser`・`resolver`・`generator` に、`collector-app` は `parser`・`formatter`・`session` に依存）を満たす順序になっています。ビルドはNode.js標準モジュールのみで完結し（依存パッケージなし）、書き出す前に次を自己検証します。
+依存の向き（`cite` は `parser` に、`structure` は `parser`・`cite` に、`generator` は `formatter` に、`session` は `parser`・`resolver`・`generator`・`structure` に、`collector-app` は `formatter`・`session`・`structure` に依存）を満たす順序になっています。ビルドはNode.js標準モジュールのみで完結し（依存パッケージなし）、書き出す前に次を自己検証します。
 
 1. 1行化後に改行が残っていないこと
 2. 生の `#` が残っていないこと
@@ -450,13 +529,13 @@ const SOURCE_ORDER = [
 
 #### 外殻IIFE
 
-`buildBody(targetKey)` が生成する実行形は、コア5モジュール＋`collector-app.js` を次のIIFEで包みます（`new` ターゲットの例。中略部分にはコア5と`collector-app.js`のソースがコメントも含めてそのまま連結されます）。
+`buildBody(targetKey)` が生成する実行形は、コア7モジュール＋`collector-app.js` を次のIIFEで包みます（`new` ターゲットの例。中略部分にはコア7と`collector-app.js`のソースがコメントも含めてそのまま連結されます）。
 
 ```js
 (function () {
 var module, exports; /* ページ側の偶発的な window.module による UMD 誤分岐を遮断 */
 try {
-/* …コア5（parser→formatter→resolver→generator→session）+ collector-app.js のソースがこの順でそのまま連結される（中略）… */
+/* …コア7（parser→cite→structure→formatter→resolver→generator→session）+ collector-app.js のソースがこの順でそのまま連結される（中略）… */
 globalThis.CRW.collectorApp.launch({"target":"new","label":"書類比較・クレームチェッカー（新版）"});
 } catch (e) {
 alert('Claim Relation Writer: 起動に失敗しました: ' + ((e && e.message) || e));
@@ -490,15 +569,26 @@ function encodeBookmarklet(body) {
 Content-Security-Policy: script-src 'self'; script-src-attr 'unsafe-inline'
 ```
 
-`script-src 'self'` の下では、外部ドメインからの `<script>` ローダも、実行時のコード評価（`eval`・`new Function`・動的 `<script>` 挿入など）も許可されません。一方、ブックマークレット（ユーザー操作起点の `javascript:` URL）は多くのブラウザでCSPの `script-src` 制約の対象外として実行されるため、**コア5モジュール＋モーダルUIを1つの自己完結インライン `javascript:` URLに収める方式が唯一現実的な配布経路**です。この前提から、`collector-app.js` は実行時コード評価・`document.write`・`<script>` 挿入を一切使わない設計方針を採用しています（DOM APIとクロージャ内の関数だけで完結）。`tests/bookmarklet.test.js` の「CSP衛生」テストが、生成後のバンドル文字列に `eval(`・`new Function(`・`document.write`・`<script` のいずれも含まれないことを検証しています。
+`script-src 'self'` の下では、外部ドメインからの `<script>` ローダも、実行時のコード評価（`eval`・`new Function`・動的 `<script>` 挿入など）も許可されません。一方、ブックマークレット（ユーザー操作起点の `javascript:` URL）は多くのブラウザでCSPの `script-src` 制約の対象外として実行されるため、**コアモジュール＋モーダルUIを1つの自己完結インライン `javascript:` URLに収める方式が唯一現実的な配布経路**です。この前提から、`collector-app.js` は実行時コード評価・`document.write`・`<script>` 挿入を一切使わない設計方針を採用しています（DOM APIとクロージャ内の関数だけで完結）。`tests/bookmarklet.test.js` の「CSP衛生」テストが、生成後のバンドル文字列に `eval(`・`new Function(`・`document.write`・`<script` のいずれも含まれないことを検証しています。
 
 #### 抽出仕様（`collector-app.js`）
 
-木構造の抽出は次のセレクタ優先順で行い、最初に見つかった非空要素を採用します（`TREE_SELECTORS`）。
+`extractStructureText(doc)` が、次の優先順で最初に見つかった非空要素を採用します。
+
+**第1段: 引用一覧（既定）** — `CITE_SELECTORS`
+
+1. `#claim_cite` — 「引用一覧」ペインの本体（ページ側の解析実行後は常に中身を持つ）
+2. `#claim_dialog #claim_cite` — ダイアログ内に複製された場合の保険
+
+**第2段: 罫線ツリー（フォールバック）** — `TREE_SELECTORS`
 
 1. `#claim_tree .div_tree` — 常駐の非表示データ保持用要素（「木構造」ダイアログを開いていなくても存在）
 2. `#claim_dialog .div_tree` — 「木構造」ダイアログを表示しているときのみ存在
 3. `.div_tree` — 上記が見つからない場合の最終手段（`.div_textarea` は複数要素で共有される汎用クラスのため単独では使用しない）
+
+引用一覧を第1段に置くのは、ページ側が引用パターン全展開の上限（5000）に達すると罫線ツリーが黙って欠落するためです（根拠と実測は「1.5 引用一覧の入力記法」を参照）。
+
+第2段（罫線ツリー）へフォールバックしたときは、`pageHasOverflowWarning(doc)` が `#claim_warn_overflow` / `#claim_kian_overflow`（ページ側は上限到達時に `hidden` クラスを外す）を確認し、上限到達を検知した場合は戻り値に `truncatedTree: true` を立ててモーダル上に警告を表示します。引用一覧から収集できた場合は、本文冒頭の ★ 行から `cite.js` 側が `meta.overflow` を立てます。
 
 抽出したHTML断片は `treeHtmlToText(html)` で次の順にプレーンテキスト化します。
 
@@ -506,13 +596,14 @@ Content-Security-Policy: script-src 'self'; script-src-attr 'unsafe-inline'
 2. 残っているタグをすべて除去
 3. 基本エンティティの復元: `&nbsp;` → 半角スペース、`&lt;` → `<`、`&gt;` → `>`、**`&amp;` → `&`（最後に処理）**
 
-`&amp;` の復元を最後に行うのは、他のエンティティ復元より先に行うと二重復元（例: `&amp;lt;` が誤って `<` まで変換されてしまう）が起きるためです。実ページの中身は半角数字・太線罫線5種・`<br>` 行終端のみで入れ子タグや実体参照は含まれませんが、将来のページ側の変更に備えてタグ除去とエンティティ復元を残しています。
+`&amp;` の復元を最後に行うのは、他のエンティティ復元より先に行うと二重復元（例: `&amp;lt;` が誤って `<` まで変換されてしまう）が起きるためです。罫線ツリーの中身は半角数字・太線罫線5種・`<br>` 行終端のみ、引用一覧はこれに加えて番号を囲む `<b>` を含みます。どちらもこのタグ除去で正しく平文化できます。
 
 #### 状態の安全規則（ローカル版と同一ポリシー＋固有のガード）
 
-- **`session.invalidateDownstream` をそのまま踏襲**: 木構造・指摘事項の種別・請求項指定のいずれかが変わると、ローカル版と同じ `CRW.session.invalidateDownstream` を通して生成済み文章とコピーボタンを即座に無効化します。
-- **生成ボタン押下時に明示的な再解析**: `session.generateFromState` は自前で構造を解析しないため、`launch` 内の `ensureParsed()` が生成のたびに `state.graph` の有無を確認し、無ければ `parser.parseClaimTree` を実行します（ローカル版の `ensureParsed` 相当）。解析に失敗した場合は行番号付きのエラーを表示し、生成を行いません。
-- **`MutationObserver` による陳腐化検知**: 木構造を収集するたび（起動時・「ページから再取得」時のいずれも）に `bindObserver()` が呼び出され、既存の監視があれば `disconnect` したうえで、そのときの `#claim_tree` 要素に対して `{ childList: true, subtree: true, characterData: true }` で監視を張り直します。収集のたびに張り直すことで、起動時点で `#claim_tree` がまだ存在しない場合や、ページ側が要素ごと差し替えた場合の検知漏れも防ぎます。ページ側で「クレーム解析」が再実行されて中身が変化すると、警告を表示して生成ボタンを一時的に無効化します。モーダルを閉じる際は必ず `disconnect` します。これにより、陳腐化した木構造から気づかれないまま生成が行われることを防ぎます。
+- **`session.invalidateDownstream` をそのまま踏襲**: クレーム構造・指摘事項の種別・請求項指定のいずれかが変わると、ローカル版と同じ `CRW.session.invalidateDownstream` を通して生成済み文章とコピーボタンを即座に無効化します。
+- **生成ボタン押下時に明示的な再解析**: `session.generateFromState` は自前で構造を解析しないため、`launch` 内の `ensureParsed()` が生成のたびに `state.graph` の有無を確認し、無ければ `session.parseIntoState`（＝書式自動判別）を実行します（ローカル版の `ensureParsed` 相当）。解析に失敗した場合は行番号付きのエラーを表示し、生成を行いません。手貼りされたテキストが上限到達済みの引用一覧だった場合も、ここで警告が出し直されます。
+- **`MutationObserver` による陳腐化検知**: クレーム構造を収集するたび（起動時・「ページから再取得」時のいずれも）に `bindObserver()` が呼び出され、既存の監視があれば `disconnect` したうえで、そのときの **`#claim_cite` と `#claim_tree` の両方**に対して `{ childList: true, subtree: true, characterData: true }` で監視を張り直します。収集のたびに張り直すことで、起動時点で対象要素がまだ存在しない場合や、ページ側が要素ごと差し替えた場合の検知漏れも防ぎます。ページ側で「クレーム解析」が再実行されて中身が変化すると、警告を表示して生成ボタンを一時的に無効化します。モーダルを閉じる際は必ずすべて `disconnect` します。これにより、陳腐化した構造から気づかれないまま生成が行われることを防ぎます。
+- **上限到達・データ不整合の警告**: `cite.js` が返す `meta.overflow` と `warnings`、および罫線ツリーへフォールバックしたときの `truncatedTree` を、木構造欄の直下の警告領域にまとめて表示します。いずれも解析自体は成功しているため、生成はブロックしません。
 - **モーダルはエフェメラル**: 状態は `launch` のクロージャ内にのみ保持され、`localStorage` は使用しません（ページのオリジンを汚しません）。
 
 #### CSS隔離
@@ -526,6 +617,13 @@ Shadow DOMは `execCommand('copy')` によるテキスト選択コピーと相�
   - **生成物の鮮度**: `scripts/build-bookmarklets.js` を一時的に再実行した結果が、コミット済みの4ファイル（`src/bookmarklet/{new,legacy}/collector.js`・`collector.bookmarklet.js`）と一致すること（改行コードは `\r\n`→`\n` に正規化して比較）。不一致の場合は「npm run build:bookmarklets で再生成してください」という案内付きで失敗します。
   - **1行版の健全性**: `javascript:` で始まる・1行である・生の `#` を含まない・`%` エスケープがすべて正しい形であること・パーセントデコードで元のソースと完全一致すること（ラウンドトリップ）・デコード後が `new Function` で構文エラーにならないこと。
   - **CSP衛生**: バンドルに `eval(`・`new Function(`・`document.write`・`<script` のいずれも含まれないこと。
-  - **連結スモーク**: `launch` 呼び出しを除いたコア5+`collector-app.js`をNode上で評価し、`CRW.parser`・`CRW.formatter`・`CRW.resolver`・`CRW.generator`・`CRW.session`・`CRW.collectorApp` がすべて登録されることを確認します（連結順を誤ると各UMDの依存ガードが例外を投げるため、順序ミスを検出できます）。
+  - **連結スモーク**: `launch` 呼び出しを除いたコア7+`collector-app.js`をNode上で評価し、`CRW.parser`・`CRW.cite`・`CRW.structure`・`CRW.formatter`・`CRW.resolver`・`CRW.generator`・`CRW.session`・`CRW.collectorApp` がすべて登録されることを確認します（連結順を誤ると各UMDの依存ガードが例外を投げるため、順序ミスを検出できます）。
   - **抽出ロジックの検証**: 合成スタブ入力で `extractTreeText` のセレクタ優先順（`#claim_tree`→`#claim_dialog`→`.div_tree`）・空要素のスキップ・全滅時の手貼り誘導メッセージを検証するほか、リポジトリ共有の `fixtures/claim-checker/{new,legacy}/` 配下の新版/旧版の保存済み実ページHTMLから `#claim_tree` 内の `div_tree` のinnerHTMLを直接取り出し、`treeHtmlToText` で変換した結果が `examples.js` の `tree6`（「書類比較・クレームチェッカー」実ページの1〜24項のツリー）とバイト一致すること、さらに `parseClaimTree` で解析した結果が独立請求項 `1・13・22・23・24` を含む期待どおりの辺集合になることを検証します（ゴールデンケース `case8-checker-page`: 指摘=1・関連=13・明確性、で生成文までバイト一致することも検証済みです）。
+  - **引用一覧優先の検証**: `extractStructureText` が `#claim_cite` を `#claim_tree` より優先すること、引用一覧が空のときだけ木構造へフォールバックすること、フォールバック時に `pageHasOverflowWarning` が上限到達を検知して `truncatedTree` を立てること（`hidden` クラス付き・空要素は到達扱いにしないこと）、全滅時のメッセージが引用一覧の手貼りも案内することを検証します。さらに `fixtures/claim-checker/new/書類比較・クレームチェッカー_引用パターン上限到達.html` から `#claim_cite` を取り出し、`parseClaimStructure` が `format: 'cite'`・92請求項・独立請求項8個・`meta.overflow === true` を返すことを確認します。
+- **`cite.test.js`**: 引用一覧の解析を対象に次を検証します。
+  - **木構造との等価性（最重要）**: 上限に達していない実ページスナップショット（24請求項）とサンプル `cite1`/`tree6` の双方で、引用一覧から作ったグラフと罫線ツリーから作ったグラフが（ノード・辺・独立請求項とも）完全一致すること。引用一覧を主データ源に採用できる根拠そのものなので、これが崩れたら設計前提が壊れています。
+  - **上限到達ケースの回帰**: 上限到達スナップショットで、木構造からは22請求項・100辺・独立請求項1個しか取れないのに対し、引用一覧からは92請求項・857辺・独立請求項8個が取れること。木構造の100辺が引用一覧の857辺の部分集合であること（矛盾ではなく欠落であることの確認）。従来 `resolver` がエラーを返していた請求項50の影響範囲が `50-67, 91` として正しく計算できること。
+  - **`被引用請求項` を使っていないことの担保**: 同じスナップショットで `被引用請求項 − うち間接被引用` から逆方向に組み立てると219辺しか復元できないことをテスト側で計算し、実装が857辺を返していることと対比します（実装がうっかり逆方向を使ったら即座に失敗します）。
+  - **書式の解釈**: `引用請求項` は直接引用元のみで `(間接引用: …)` を辺にしないこと、全角数字・全角コロン・全角括弧の正規化、エラー（空入力・引用一覧でない・自己引用・循環）と警告（申告値との不一致、上限未到達時の順逆不一致）の出し分け。
+  - **書式判定**: `structure.detectFormat` / `parseClaimStructure` が引用一覧・木構造・判定不能を正しく振り分けること。
 - **`tests/browser-test.html`**: 同じ `examples/examples.js` のゴールデンケースをブラウザ上で実行して確認するためのページです。`file://` で開いた場合の動作確認や、`localStorage` が利用可能かどうかの確認も行います。

@@ -48,7 +48,8 @@
   }
 
   // 三色DFS（反復版・巨大入力でも再帰スタックを溢れさせない）で循環を検出し、
-  // 循環している請求項の経路を返す（なければ null）
+  // 循環している請求項の経路を返す（なければ null）。
+  // 罫線ツリー・引用一覧のどちらの解析でも使うため cite.js からも呼ぶ（エクスポート済み）
   function findCycle(nodes, edges) {
     const children = new Map();
     for (const [from, to] of edges) {
@@ -255,5 +256,5 @@
     return { ok: true, claims: [...claims].sort((x, y) => x - y) };
   }
 
-  return { parseClaimTree, parseClaimNumberList };
+  return { parseClaimTree, parseClaimNumberList, findCycle };
 });
