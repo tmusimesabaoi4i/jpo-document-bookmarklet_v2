@@ -6,7 +6,7 @@
 
 | プロジェクト | プロファイル | 内容 |
 |---|---|---|
-| [`document_downloader/`](document_downloader/README.md) | 軽量版 | JPO 文書ページから文書（テキスト / HTML / 画像 / 印刷）を一括保存するブックマークレット |
+| [`document_downloader/`](document_downloader/README.md) | 軽量版 | JPO 文書一覧ページから、国内書類（テキスト / HTML / 画像 / PDF / 印刷）と OPD 書類（他庁公開情報）を一括保存するブックマークレット |
 | [`claim_relation_writer/`](claim_relation_writer/README.md) | フル版 | クレームの引用関係（クレームツリー）を解析し、明確性・サポート要件の拒絶理由定型文を生成するツール。ローカル版 UI とブックマークレット版の両方あり |
 | [`blank_note_printer/`](blank_note_printer/README.md) | 軽量版 | JPO 文書一覧ページの出願番号から、空白 A4 約 30 枚を印刷して `出願番号_note.pdf` を作るブックマークレット |
 | [`rejection_reason_bookmarklet/`](rejection_reason_bookmarklet/README.md) | フル版 | 拒絶理由通知の全文を解析し、指摘事項（明確性・サポート要件・29条系）を構造化して表形式・別タブレポートで表示するブックマークレット |
@@ -21,9 +21,11 @@ jpo-document-bookmarklet_v2/
 │   ├── claim-checker/         … 書類比較・クレームチェッカー（new/ と legacy/）
 │   └── rejection-reason/      … 拒絶理由通知のテキストサンプル
 ├── templates/                 … 【共有】新規プロジェクト用の雛形（full/ と lite/。手順: templates/README.md）
-├── document_downloader/       … 軽量版プロジェクト
-│   ├── src/bookmarklet/       … collector.js（編集用）+ collector.bookmarklet.js（1行版）
-│   └── archive/               … ツール旧世代（v1 / v2）の退避
+├── document_downloader/       … 軽量版プロジェクト（+ 生成スクリプトとテスト）
+│   ├── src/bookmarklet/       … collector.js（編集用＝正本）+ collector.bookmarklet.js（1行版・生成物）
+│   ├── scripts/               … build-bookmarklet.js（1行版の生成。依存ゼロ）
+│   ├── tests/                 … node --test 用（依存ゼロ）
+│   └── archive/               … ツール旧世代（v1 / v2 / v3）の退避
 ├── blank_note_printer/        … 軽量版プロジェクト（空白ノート印刷）
 │   ├── src/bookmarklet/       … collector.js（編集用）+ collector.bookmarklet.js（1行版）
 │   └── archive/               … （現在は空）
@@ -57,6 +59,7 @@ jpo-document-bookmarklet_v2/
 プロジェクトは次の 2 プロファイルのどちらかで作ります。**軽量版はフル版の厳密な部分集合**なので、軽量版で始めてフォルダを足せばフル版に昇格できます。
 
 - **軽量版**（ブックマークレットのみ）: `README.md` + `src/bookmarklet/`（編集用 `X.js` と 1 行版 `X.bookmarklet.js` のペア）+ `archive/`（任意）。ビルドなし・手動反映。
+  - 例外: `document_downloader` はソースが大きく手作業での 1 行化が現実的でないため、依存ゼロの `scripts/build-bookmarklet.js`（1 行版の生成）と `tests/`（`node --test`）だけを足しています。ローカル UI もコアモジュール分割も持たないので軽量版のままです。`package.json` は置かず、テストはリポジトリルートから実行します。
 - **フル版**（ローカル UI + ブックマークレット + テスト + ビルド）: 軽量版 + `package.json` + `src/core/` + `src/local/` + `src/bookmarklet/common/`（ビルド元）+ `scripts/` + `tests/` + `examples/` + `docs/`。
 
 命名規約:
@@ -81,4 +84,5 @@ jpo-document-bookmarklet_v2/
 
 - 各プロジェクトに同名の `collector.js` / `collector.bookmarklet.js` がありますが中身は無関係の別物です。検索時はフォルダ名まで確認してください。
 - `claim_relation_writer` の `npm test` は共有の `fixtures/` を読むテストを含むため、リポジトリ全体をチェックアウトした状態で実行してください。
+- `document_downloader` のテストも共有の `fixtures/` を読みます。リポジトリルートから `node --test "document_downloader/tests/*.test.js"` で実行してください（`package.json` なし・依存ゼロ）。
 - 罫線ツリー記法の解析は `claim_relation_writer/src/core/parser.js` と `rejection_reason_bookmarklet/src/core/claim-tree.js` の**2か所に独立実装**があります（上記「プロジェクト間の独立性」のルールに従った意図的な取り込み）。記法の解釈を変える場合は両方を確認してください。

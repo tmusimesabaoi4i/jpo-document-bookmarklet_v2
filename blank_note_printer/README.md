@@ -33,9 +33,15 @@ blank_note_printer/
 
 ## 対象ページと動作確認
 
-- 前提ページ: JPO 文書一覧ページ（新版 `/core/jsv/` 系を主対象）。出願番号 `#lappnum` に依存（`document_downloader` と同じ）
+- 前提ページ: JPO 文書一覧ページ（新版 `/core/jsv/` 系を主対象）。出願番号 `#lappnum` の表示文字列に依存
 - `#lappnum` が見つからない場合は alert で案内して終了。ポップアップがブロックされた場合も alert で許可を促す
-- ローカル確認: リポジトリ共有の [`fixtures/document-list/new/特願2024-563143.html`](../fixtures/document-list/new/特願2024-563143.html)（新版ページ）／同 `legacy/`（旧版ページ）をブラウザで開いてブックマークレットを実行
+- ⚠ **2026 年の新 UI 未対応**: 現行の JPO 経過情報ページでは `#lappnum` のリンク文言が出願番号ではなく
+  「Evrikaでスクリーニング」に変わっており、このツールはファイル名に誤った文字列を使います。
+  `fixtures/document-list/new/経過_特願2022-122252.html` で再現します。
+  `document_downloader` は v4 でフォールバック（「本願番号」欄の地の文など）を実装済みなので、
+  修正する場合は `document_downloader/src/bookmarklet/collector.js` の `resolveAppNo()` を参考にしてください
+  （ルート README「プロジェクト間の独立性」に従い、参照ではなく取り込むこと）。
+- ローカル確認: リポジトリ共有の [`fixtures/document-list/legacy/特願2024-563143_beta.html`](../fixtures/document-list/legacy/特願2024-563143_beta.html)（`#lappnum` に出願番号が入る世代）／`new/`（現行 UI・上記のとおり未対応）／`legacy/特願2024-563143.html`（旧版ページ）をブラウザで開いてブックマークレットを実行
   - スナップショットはコンパニオンフォルダ（`*_files/`）なしで保存されているため、スタイルなしで表示されます（`#lappnum` の確認には影響しません）
 
 ## 開発（ビルドなし）

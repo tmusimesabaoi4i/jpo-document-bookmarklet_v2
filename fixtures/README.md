@@ -12,8 +12,33 @@
 
 | ファイル | 世代 | 取得元ページ | 参照元 |
 |---|---|---|---|
-| `new/特願2024-563143.html` | 新版（`/core/jsv/` 系） | JPO 文書一覧（特願2024-563143） | `document_downloader`・`blank_note_printer` の手動動作確認 |
-| `legacy/特願2024-563143.html` | 旧版 | 同上（旧版ページ） | `document_downloader`（v2 以前の確認用）・`blank_note_printer` の手動動作確認 |
+| `new/経過_特願2022-122252.html` | 新版（現行 UI・`www.beta.jpo.go.jp/main/core/jsv/`） | JPO 経過情報（特願2022-122252）。**他庁公開情報 3 件あり・ダミー行あり** | `document_downloader/tests/collector.test.js`（自動テスト）・手動確認 |
+| `new/経過_特願2023-170613.html` | 新版（現行 UI・同上） | JPO 経過情報（特願2023-170613）。**「他庁公開情報はありません」ケース** | 同上 |
+| `new/doclist.js.txt` | 新版（現行 UI・同上） | ページが読み込む `doclist.js` の写し（HTML スナップショットではない） | `document_downloader` の仕様根拠（OPD の生成・ポーリング手順） |
+| `legacy/特願2024-563143_beta.html` | 新版だが 2024 年ごろの UI（`www.beta.jpo.go.jp`） | JPO 文書一覧（特願2024-563143） | `document_downloader/tests/collector.test.js`（後方互換の確認）・`blank_note_printer` の手動動作確認 |
+| `legacy/特願2024-563143.html` | 旧版（`gem.prototype.jpo.go.jp/core/docs/`） | 同上（旧版ページ） | 同上 |
+
+#### 新 UI（2026 年）で変わった点
+
+`new/経過_*.html` の 2 件は、`legacy/特願2024-563143_beta.html` と同じ `www.beta.jpo.go.jp` 系ですが
+DOM が変わっています。ブックマークレットが壊れた原因そのものなので、両方を残しています。
+
+- `#lappnum` の**リンク文言が出願番号から「Evrikaでスクリーニング」に変わり**、出願番号は親 `<td>` の
+  地の文（`特願2022-122252 (20220729) [ … ]`）へ移った。
+- `Doclist.init()` が読む `meta[data-title="LappnumStr"]` / `meta[data-title="Lappnum"]` が
+  **保存時点で既に削除済み**（JS が実行後に `remove()` するため）。`legacy/特願2024-563143_beta.html`
+  にはまだ残っているので、meta 依存の実装は新 UI でだけ壊れる。
+- 実体のない行が `<tr data-content-id="BBBBBBBBBBB_0000_ ">` や `…_0000_` として並び、
+  チェックボックスが `disabled`・`td.code` がリンクではなく素のテキストになっている。
+- `div.tbl_others`（他庁公開情報）が追加され、`input[name="pubnum"]` と
+  `button[data-elm="opd_bulk_individual"|"opd_bulk_consolidated"]`、`div[data-elm="opd_bulk_status"]` を持つ。
+
+`new/doclist.js.txt` は、このフォルダで唯一の「ページスナップショットではない参考資料」です
+（`rejection-reason/拒絶理由例.txt` と同じ例外扱い）。OPD の一括ダウンロード手順
+（`Doclist.opdDownload` → `__checkOpdBulkStatus` → `__showDownloadBulkStatus`、
+`INTERVAL_BULK_STATUS = 1*1000`）の根拠として参照します。
+**URL 定数（`URL_OPD_BULK_STATUS` / `URL_OPD_BULK_DOWNLOAD`）の値はこのファイルには含まれません**
+（`define_url.js` で定義されており、そちらは保存されていません）。実装側は値を推測せず、実ページ上で実測します。
 
 ### claim-checker/ — 書類比較・クレームチェッカー
 

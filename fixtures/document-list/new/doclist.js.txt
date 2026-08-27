@@ -1,0 +1,680 @@
+Doclist = {
+    lappnum: null,
+    lappnum_str: null,
+    MAX_JSV_DOWNLOAD: 10,                   // 中間書類一括ダウンロードの上限件数
+    MAX_CITATION_DOWNLOAD: 20,              // 引用文献一括ダウンロードの上限件数
+    INTERVAL_BULK_STATUS: 1*1000,           // 中間書類, 引用文献一括ダウンロードの生成状況問合せ間隔(秒)
+    unique_lappnumlist: [],                 // 自分自身, 一族出願, 関連出願の出願番号（重複排除用）
+    references: [],                         // 関連出願
+};
+
+/**
+ * 初期化.
+ */
+Doclist.init = () => {
+    // --- metaタグから出願番号を取得 ---
+    const elem_lappnum = document.querySelector('meta[data-title="Lappnum"]');
+    Doclist.lappnum = elem_lappnum.dataset['value'];
+    elem_lappnum.remove();
+    const elem_lappnum_str = document.querySelector('meta[data-title="LappnumStr"]');
+    Doclist.lappnum_str = elem_lappnum_str.dataset['value'];
+    elem_lappnum_str.remove();
+    // --- Doclist.unique_lappnumlistを生成 ---
+    // 自分(本願)を含む一族出願を追加
+    document.querySelectorAll('div.tbl_bunkatu table tbody input[type="checkbox"][name="lappnum"]').forEach(function(elm) {
+        Doclist.unique_lappnumlist.push(elm.value);
+    });
+    // 重複排除
+    Doclist.unique_lappnumlist = [...new Set(Doclist.unique_lappnumlist)];
+    // -- metaタグからreferencesを取得し、関連出願のHTMLを生成 ---
+    // 一族出願との重複排除が必要になるため、Doclist.unique_lappnumlist生成後に実施する.
+    references = JSON.parse( document.querySelector('meta[data-key="references"]').getAttribute('data-value') );
+    Doclist.__addReferences(references);
+    document.querySelector('meta[data-key="references"]').remove();
+};
+
+
+/**
+ * 出願番号リンク押下イベント. 出願番号でEvrikaを開く.
+ * @param {Event} ev onclickイベント
+ */
+Doclist.click_lappnum_link = (ev) => {
+    const title=`Evrika (${Doclist.lappnum_str}の公報)`
+    Doclist.openEvrika([Doclist.lappnum], title);
+};
+
+/**
+ * 対象カテゴリのテーブルのチェックボックスをすべて変更する.
+ * @param {Event} ev changeイベント
+ */
+Doclist.change_checked_all = (ev) => {
+    // チェックされた後に発火するためチェック状態が同期される
+    const table = ev.target.closest('table');
+    const checkboxes = table.querySelectorAll('#doclist input[type="checkbox"]');
+    for (cb of checkboxes) {
+        if (cb.disabled) continue;
+        cb.checked = ev.target.checked;
+    }
+};
+
+/**
+ * Checkerを開く.
+ */
+Doclist.checker = (ev) => {
+    const url = URL_CHECKER_LAPPNUM.replace('{lappnum}', Doclist.lappnum);
+    window.open(url, '_blank', 'noopener');
+};
+
+/**
+ * Sophiaを開く.
+ */
+Doclist.sophia = (ev) => {
+    const url = URL_SOPHIA.replace('{sophia_id}', Doclist.lappnum);
+    window.open(url, '_blank', 'noopener');
+};
+
+/**
+ * Envrikaでスクリーニング ボタン押下イベント. チェックされている中間書類でEvrikaを開く.
+ * @param {Event} ev clickイベント
+ */
+Doclist.screening = (ev) => {
+    const title=`Evrika (${Doclist.lappnum_str}の中間書類)`
+    let data_evrika_list = []
+    const checkboxes = document.querySelectorAll('#doclist input[type="checkbox"][data-content-evrika]:checked');
+    for (const cb of checkboxes) {
+        // {content_id}_{発送日}_{書類名} 形式でEvrikaに連携することでEvrika側で発送日と中間書類名を表示できるようにする。
+        const data_content_evrika = cb.dataset['contentEvrika'];
+        if (data_content_evrika) {
+            data_evrika_list.push(data_content_evrika);
+        }
+    }
+
+    if (data_evrika_list.length > 0) {
+        // 開く対象が設定されているのでスクリーニング開始
+        Doclist.openEvrika(data_evrika_list, title);
+    } else {
+        // 開く対象が未設定のため終了
+        MessageBox.show("error", "スクリーニング対象の書類が未選択です。");
+    }
+}
+
+/**
+ * Evrikaを開く.
+ * referer_lappnumはDoclistから取得する.
+ *
+ * @param {string[]} doclist 書類実体番号 or 出願番号 (+ _{発送日}_{中間書類名})
+ */
+Doclist.openEvrika = (doclist, title) => {
+    const search_history_id='';
+    const wordlist=[];
+    const kwds = {};
+    const referer_access_source='Jsv/doclist';
+    const referer_lappnum='';
+    const referer_search_history_id='';
+    const target = '_blank';
+    WindowEvrika.openNew(
+        search_history_id, doclist, title, wordlist, kwds,
+        referer_access_source, referer_lappnum, referer_search_history_id,
+        target,
+    );
+}
+
+/**
+ * 書類実体を取得する.
+ * @param {Event} ev 書類実体
+ */
+Doclist.click_content_link = (ev) => {
+    const elem = ev.target;
+    Doclist.open_doccontent(elem.dataset['contentId'], elem.dataset['title']);
+};
+
+/**
+ * 書類実体参照APIを開く.
+ * @param {string} content_id 書類実体番号
+ * @param {string} title 書類実体のタイトル
+ */
+Doclist.open_doccontent = (content_id, title="") => {
+    const entries = {
+        'title': title,
+    }
+    const fragment = document.createDocumentFragment();
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = URL_JSV_CONTENT.replace('{content_id}', content_id);
+    form.target = '_blank';
+    fragment.append(form);
+    for (const [name, value] of Object.entries(entries)) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        form.appendChild(input);
+    }
+    document.body.appendChild(fragment);
+    form.submit();
+    form.remove();
+};
+
+/**
+ * 中間書類一括ダウンロード
+ * @param {string} mode 出力形式(individual|consolidated)
+ */
+Doclist.jsvBulkDownload = function(mode) {
+    let lappnumlist = [];
+    if (document.querySelector('div.tbl_bunkatu')) {
+        // 一族出願がある -> チェックONの出願番号を収集
+        document.querySelectorAll('div.tbl_bunkatu table tbody input[type="checkbox"][name="lappnum"]:checked').forEach(function(elm) {
+            lappnumlist.push(elm.value);
+        });
+    } else {
+        // 一族出願がない -> 自分自身を対象に含める
+        lappnumlist.push(Doclist.lappnum);
+    }
+    // 関連出願
+    document.querySelectorAll('div.tbl_references table tbody input[type="checkbox"][name="lappnum"]:checked').forEach(function(elm) {
+        lappnumlist.push(elm.value);
+    });
+    // 重複排除
+    lappnumlist = [...new Set(lappnumlist)];
+    // バリデート
+    if (lappnumlist.length == 0) {
+        MessageBox.show('error', `対象が選択されていません。`);
+        return;
+    }
+    // ダウンロードOKはMAX_JSV_DOWNLOAD件まで
+    if (lappnumlist.length > Doclist.MAX_JSV_DOWNLOAD) {
+        MessageBox.show('error', `ダウンロード件数が多すぎます。<br>${Doclist.MAX_JSV_DOWNLOAD}件まで指定可能です。`);
+        return;
+    }
+    // ボタン無効化
+    Doclist.__showDownloadBulkStatus(null, 'jsv');
+    // 中間書類一括ダウンロード処理開始
+    const callback_func = {
+        'done': function(response) {
+            response.json().then(function(jsondata) {
+                Doclist.__showDownloadBulkStatus(jsondata, 'jsv');
+            });
+        },
+        'fail': function(err) {
+            // エラーは終了
+            Doclist.__showDownloadBulkStatus({status: 'error'}, 'jsv');
+        },
+    }
+    APIFetch.async_post(URL_JSV_CONTENTS_BULK_STATUS, {'lappnumlist': lappnumlist, 'mode': mode}, callback_func);
+}
+
+/**
+ * 中間書類一括ダウンロード > 生成状況問合せ
+ * @param {string} hashkey ダウンロードキー
+ */
+Doclist.__checkJsvBulkStatus = function(hashkey) {
+    const callback_func = {
+        'done': function(response) {
+            response.json().then(function(jsondata) {
+                Doclist.__showDownloadBulkStatus(jsondata, 'jsv');
+            });
+        },
+        'fail': function(err) {
+            // エラーは終了
+            Doclist.__showDownloadBulkStatus({status: 'error'}, 'jsv');
+        },
+    }
+    APIFetch.async_get(URL_JSV_CONTENTS_BULK_STATUS + `?hashkey=${hashkey}`, callback_func);
+}
+
+/**
+ * 引用文献一括ダウンロード
+ * @param {string} mode 出力形式(individual|consolidated)
+ */
+Doclist.citationDownload = function(mode) {
+    let lappnumlist = [];
+    // 一族出願
+    document.querySelectorAll('div.tbl_bunkatu table tbody input[type="checkbox"][name="lappnum"]:checked').forEach(function(elm) {
+        lappnumlist.push(elm.value);
+    });
+    // 関連出願
+    document.querySelectorAll('div.tbl_references table tbody input[type="checkbox"][name="lappnum"]:checked').forEach(function(elm) {
+        lappnumlist.push(elm.value);
+    });
+    // 重複排除
+    lappnumlist = [...new Set(lappnumlist)];
+    // 他庁公開情報
+    let pubnumlist = [];
+    document.querySelectorAll('div.tbl_others table tbody input[type="checkbox"][name="pubnum"]:checked').forEach(function(elm) {
+        pubnumlist.push(elm.value);
+    });
+    // バリデート
+    if (lappnumlist.length == 0 && pubnumlist.length == 0) {
+        MessageBox.show('error', `対象が選択されていません。`);
+        return;
+    }
+    // ダウンロードOKはMAX_CITATION_DOWNLOAD件まで
+    if ((lappnumlist.length + pubnumlist.length) > Doclist.MAX_CITATION_DOWNLOAD) {
+        MessageBox.show('error', `ダウンロード件数が多すぎます。<br>${Doclist.MAX_CITATION_DOWNLOAD}件まで指定可能です。`);
+        return;
+    }
+    // ボタン無効化
+    Doclist.__showDownloadBulkStatus(null, 'citation');
+    // 引用文献一括ダウンロード処理開始
+    const callback_func = {
+        'done': function(response) {
+            response.json().then(function(jsondata) {
+                Doclist.__showDownloadBulkStatus(jsondata, 'citation');
+            });
+        },
+        'fail': function(err) {
+            // エラーは終了
+            Doclist.__showDownloadBulkStatus({status: 'error'}, 'citation');
+        },
+    }
+    APIFetch.async_post(URL_CITATION_BULK_STATUS, {'lappnum': Doclist.lappnum, 'lappnumlist': lappnumlist, 'pubnumlist': pubnumlist, 'mode': mode}, callback_func);
+}
+
+/**
+ * 引用文献一括ダウンロード > 生成状況問合せ
+ * @param {string} hashkey ダウンロードキー
+ */
+Doclist.__checkCitationBulkStatus = function(hashkey) {
+    const callback_func = {
+        'done': function(response) {
+            response.json().then(function(jsondata) {
+                Doclist.__showDownloadBulkStatus(jsondata, 'citation');
+            });
+        },
+        'fail': function(err) {
+            // エラーは終了
+            Doclist.__showDownloadBulkStatus({status: 'error'}, 'citation');
+        },
+    }
+    APIFetch.async_get(URL_CITATION_BULK_STATUS + `?hashkey=${hashkey}`, callback_func);
+}
+
+/**
+ * 中間書類一括ダウンロード, 引用文献一括ダウンロード > 処理状態に応じて画面の表示を変更
+ * @param {dict} jsondata
+ *      status:   処理状況(waiting|working|empty|error|success)
+ *      hashkey: ダウンロードキー
+ *      url:      ダウンロードURL
+ * @params {string} key DOMのselectorに使うキー
+ */
+Doclist.__showDownloadBulkStatus = function(jsondata, key) {
+    if (jsondata == null) {
+        // --- 開始処理 ---
+        // 「一括ダウンロード」ボタンを非表示
+        document.querySelectorAll(`button[data-elm="${key}_bulk_individual"]`).forEach(function(btn) { btn.style.display   = 'none'; });
+        document.querySelectorAll(`button[data-elm="${key}_bulk_consolidated"]`).forEach(function(btn) { btn.style.display = 'none'; });
+        // メッセージを表示
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).style.display = '';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).textContent   = '処理中です。しばらくお待ちください。';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.add('base-success');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-warning');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-danger');
+    } else if (jsondata.status == 'waiting' || jsondata.status == 'working') {
+        // --- 開始待ち or 処理中 ---
+        // 「一括ダウンロード」ボタンを非表示
+        document.querySelectorAll(`button[data-elm="${key}_bulk_individual"]`).forEach(function(btn) { btn.style.display   = 'none'; });
+        document.querySelectorAll(`button[data-elm="${key}_bulk_consolidated"]`).forEach(function(btn) { btn.style.display = 'none'; });
+        // メッセージを表示
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).style.display = '';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).textContent   = '処理中です。しばらくお待ちください。';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.add('base-success');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-warning');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-danger');
+        // INTERVAL_BULK_STATUS秒後に再問合せ
+        if (key == 'jsv') {
+            setTimeout(function() {
+                Doclist.__checkJsvBulkStatus(jsondata.hashkey);
+            }, Doclist.INTERVAL_BULK_STATUS);
+        } else if (key == 'citation') {
+            setTimeout(function() {
+                Doclist.__checkCitationBulkStatus(jsondata.hashkey);
+            }, Doclist.INTERVAL_BULK_STATUS);
+        } else if (key == 'opd') {
+            setTimeout(function() {
+                Doclist.__checkOpdBulkStatus(jsondata.hashkey);
+            }, Doclist.INTERVAL_BULK_STATUS);
+        }
+    } else if (jsondata.status == 'empty') {
+        // --- 対象なし ---
+        // 「一括ダウンロード」ボタンを表示
+        document.querySelectorAll(`button[data-elm="${key}_bulk_individual"]`).forEach(function(btn) { btn.style.display   = ''; });
+        document.querySelectorAll(`button[data-elm="${key}_bulk_consolidated"]`).forEach(function(btn) { btn.style.display = ''; });
+        // メッセージを非表示
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).style.display = 'none';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).textContent   = '';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-success');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-warning');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-danger');
+        if (key == 'jsv') {
+            MessageBox.show('warning', 'ダウンロード可能な中間書類がありません。');
+        } else if (key == 'citation') {
+            MessageBox.show('warning', 'ダウンロード可能な引用文献がありません。');
+        } else if (key == 'opd') {
+            MessageBox.show('warning', 'ダウンロード可能な書類がありません。');
+        }
+    } else if (jsondata.status == 'success') {
+        // --- 成功 ---
+        // 「一括ダウンロード」ボタンを表示
+        document.querySelectorAll(`button[data-elm="${key}_bulk_individual"]`).forEach(function(btn) { btn.style.display   = ''; });
+        document.querySelectorAll(`button[data-elm="${key}_bulk_consolidated"]`).forEach(function(btn) { btn.style.display = ''; });
+        // メッセージを非表示
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).style.display = 'none';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).textContent   = '';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-success');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-warning');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-danger');
+        // ダウンロード
+        if (key == 'jsv') {
+            window.open(URL_JSV_CONTENTS_BULK_DOWNLOAD.replace(/{hashkey}/g, jsondata.hashkey));
+        } else if (key == 'citation') {
+            window.open(URL_CITATION_BULK_DOWNLOAD.replace(/{hashkey}/g, jsondata.hashkey));
+        } else if (key == 'opd') {
+            window.open(URL_OPD_BULK_DOWNLOAD.replace(/{hashkey}/g, jsondata.hashkey));
+        }
+    } else {
+        // --- エラー ---
+        // 「一括ダウンロード」ボタンを表示（再実行可能にする）
+        document.querySelectorAll(`button[data-elm="${key}_bulk_individual"]`).forEach(function(btn) { btn.style.display   = ''; });
+        document.querySelectorAll(`button[data-elm="${key}_bulk_consolidated"]`).forEach(function(btn) { btn.style.display = ''; });
+        // メッセージを表示
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).style.display = '';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).textContent   = 'ダウンロードできませんでした。';
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-success');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.remove('base-warning');
+        document.querySelector(`div[data-elm="${key}_bulk_status"]`).classList.add('base-danger');
+    }
+}
+
+/**
+ * 一族出願、関連出願、他庁公開情報の全チェックON|OFFを切り替える
+ * @param {Event} event
+ */
+Doclist.__toggleCheckAll = function(event) {
+    // テーブルのチェックボックスON|OFFを切り替え
+    const parentTbl = event.target.closest('table');
+    const isChecked = parentTbl.querySelector('thead input[type="checkbox"]').checked;
+    parentTbl.querySelectorAll('tbody input[type="checkbox"]').forEach(function(elm) {
+        elm.checked = isChecked;
+    });
+    // チェック状態に応じたボタンの有効|無効切り替え
+    Doclist.__toggleEnabledButton();
+}
+
+/**
+ * 一族出願、関連出願、他庁公開情報のチェックON|OFFによる全チェックON|OFFの状態変更
+ * @param {Event} event
+ */
+Doclist.__toggleCheck = function(event) {
+    // テーブルのチェックボックスON|OFFを切り替え
+    if (event == null || event.target == null) return;
+    const parentTbl = event.target.closest('table');
+    if (parentTbl == null) return;
+    if (
+        parentTbl.querySelectorAll('tbody input[type="checkbox"]').length > 0 &&
+        parentTbl.querySelectorAll('tbody input[type="checkbox"]').length == parentTbl.querySelectorAll('tbody input[type="checkbox"]:checked').length
+    ) {
+        parentTbl.querySelector('thead input[type="checkbox"]').checked = true;
+    } else {
+        parentTbl.querySelector('thead input[type="checkbox"]').checked = false;
+    }
+    // チェック状態に応じたボタンの有効|無効切り替え
+    Doclist.__toggleEnabledButton();
+}
+
+/**
+ * チェック状態に応じたボタンの有効|無効切り替え
+ */
+Doclist.__toggleEnabledButton = function() {
+    const lenBunkatu = document.querySelectorAll('div.tbl_bunkatu table tbody input[type="checkbox"]:checked').length;
+    const lenReferences = document.querySelectorAll('div.tbl_references table tbody input[type="checkbox"]:checked').length;
+    const lenOthers = document.querySelectorAll('div.tbl_others table tbody input[type="checkbox"]:checked').length;
+    // 書類一覧一括DL
+    // - 一族出願, 関連出願で1件も選択されていない場合、複数ファイルと単一ファイルのダウンロードボタンを無効化
+    // - 一族出願, 関連出願で1件しか選択されていない場合、複数ファイルのダウンロードボタンを無効化
+    if ((lenBunkatu+lenReferences) == 0) {
+        document.querySelector('button[data-elm="jsv_bulk_individual"]').disabled   = true;
+        document.querySelector('button[data-elm="jsv_bulk_consolidated"]').disabled = true;
+    } else if ((lenBunkatu+lenReferences) == 1) {
+        document.querySelector('button[data-elm="jsv_bulk_individual"]').disabled   = true;
+        document.querySelector('button[data-elm="jsv_bulk_consolidated"]').disabled = false;
+    } else {
+        document.querySelector('button[data-elm="jsv_bulk_individual"]').disabled   = false;
+        document.querySelector('button[data-elm="jsv_bulk_consolidated"]').disabled = false;
+    }
+    // 引用文献一括DL
+    // - 一族出願, 関連出願, 他庁公開情報で1件も選択されていない場合、複数ファイルと単一ファイルのダウンロードボタンを無効化
+    // - 1件指定でも引用文献はN件になるため、選択が1件でも複数ファイルのボタンは無効化しない
+    if ((lenBunkatu+lenReferences+lenOthers) == 0) {
+        document.querySelector('button[data-elm="citation_bulk_individual"]').disabled   = true;
+        document.querySelector('button[data-elm="citation_bulk_consolidated"]').disabled = true;
+    } else {
+        document.querySelector('button[data-elm="citation_bulk_individual"]').disabled   = false;
+        document.querySelector('button[data-elm="citation_bulk_consolidated"]').disabled = false;
+    }
+}
+
+/**
+ * 関連出願 > 入力欄を表示
+ */
+Doclist.showReferences = function() {
+    document.querySelector('div.tbl_references div[data-elm="show_references_blocks"]').style.display   = 'none';
+    document.querySelector('div.tbl_references div[data-elm="input_references_blocks"]').style.display  = '';
+}
+
+/**
+ * 関連出願 > 入力欄を非表示 > 入力欄の文献を追加
+ */
+Doclist.addReferences = function() {
+    // 関連出願 > 入力欄を非表示
+    let references = document.querySelector('div.tbl_references div[data-elm="input_references_blocks"] textarea[name="references"]').value;
+    references = references.replace(/\r?\n/g, '\n').replace(/\n+/g, '\n');
+    if (references.length == 0) {
+        MessageBox.show('warning', '関連出願が未入力です');
+        return;
+    }
+    // 入力欄の文献を追加
+    document.querySelector('div.tbl_references div[data-elm="show_references_blocks"]').style.display  = '';
+    document.querySelector('div.tbl_references div[data-elm="input_references_blocks"]').style.display = 'none';
+    document.querySelector('div.tbl_references div[data-elm="input_references_blocks"] textarea[name="references"]').value = "";
+    const callback_func = {
+        'done': function(response) {
+            response.json().then(function(jsondata) {
+                // 関連出願を追加
+                Doclist.__addReferences(jsondata);
+            });
+        },
+        'fail': function(err) {
+            // エラーは終了
+            MessageBox.show('error', '関連出願の追加に失敗しました');
+        },
+    }
+    const params = {
+        'dockey_list': references.split('\n'),
+    };
+    APIFetch.async_post(URL_JSV_DOCLIST_REFERENCES, params, callback_func);
+}
+
+/**
+ * 関連出願のレスポンス処理
+ * @param {dict} jsondata
+ */
+Doclist.__addReferences = function(jsondata) {
+    if (jsondata.errors.length > 0) {
+        MessageBox.show('error', `以下の文献は出願番号が取得できなかったため除外しました。<br/>${jsondata.errors.join('<br/>')}`);
+    }
+    let duplicate = [];
+    jsondata.references.map(function(row) {
+        if (Doclist.unique_lappnumlist.indexOf(row.lappnum) == -1) {
+            // 重複する出願番号がない -> 追加
+            row.url = URL_JSV_DOCLIST_EXAM.replace('{lappnum}', row.lappnum);
+            Doclist.references.push(row);
+            // 重複排除
+            Doclist.unique_lappnumlist.push(row.lappnum);
+        } else {
+            // 重複する出願番号がある -> 重複排除のため追加しない
+            duplicate.push(row.lappnum_str);
+        }
+    });
+    if (duplicate.length > 0) {
+        MessageBox.show('warning', `以下の文献は一族出願または関連出願に既に含まれているため除外しました。<br/>${duplicate.join('<br/>')}`);
+    }
+    Doclist.__referencesHTML();
+}
+
+/**
+ * Doclist.referencesを使って関連出願の一覧テーブルを作成し、イベントを追加
+ */
+Doclist.__referencesHTML = function() {
+    if (Doclist.references.length == 0) {
+        // 関連出願がない
+        document.querySelector('div.tbl_references table tbody').innerHTML = '';
+        document.querySelector('div.tbl_references div[data-elm="tbl_references_blocks"]').style.display = 'none';
+    } else {
+        // 関連出願がある
+        let icon_svg_close = '';
+        icon_svg_close += '<svg xmlns="http://www.w3.org/2000/svg" class="icon-svg">';
+        icon_svg_close += '<use href="/main/core/static/common/lib/google/icons.svg#icon_close"></use>';
+        icon_svg_close += '</svg>';
+        let html = '';
+        Doclist.references.map(function(row, idx) {
+            html += '<tr>';
+            html += `<td class="text-center width-narrow">${idx+1}</td>`;
+            html += `<td class="text-center width-narrow"><input type="checkbox" name="lappnum" value="${row.lappnum}" /></td>`;
+            html += `<td class="text-center width-narrow">`;
+            if (row.has_cited && row.exists_bulk_targets) {
+                html += '<span title="ダウンロード対象を含む引用文献がある">●</span>';
+            } else if (row.has_cited) {
+                html += '<span title="引用文献はあるが、ダウンロード対象となる引用文献はない">○</span>';
+            }
+            html += `</td>`;
+            html += `<td class="text-left   width-wide"><a href="${row.url}" name="lappnum_link">${row.lappnum_str}</a></td>`;
+            html += `<td class="text-left">${row.pubnum}</td>`;
+            html += `<td class="text-center width-narrow"><button type="button" class="btn-icon" name="delete" title="削除">${icon_svg_close}</button></td>`;
+            html += '</tr>';
+        });
+        document.querySelector('div.tbl_references table tbody').innerHTML = html;
+        document.querySelector('div.tbl_references div[data-elm="tbl_references_blocks"]').style.display = '';
+        // --- イベント追加 ---
+        // チェックボックス
+        document.querySelectorAll('div.tbl_references table tbody input[type="checkbox"][name="lappnum"]').forEach(function(elm) {
+            elm.addEventListener('change', Doclist.__toggleCheck);
+        });
+        // 削除
+        document.querySelectorAll('div.tbl_references table tbody button[name="delete"]').forEach(function(elm) {
+            elm.addEventListener('click', function(event) {
+                const lappnum     = elm.closest('tr').querySelector('input[type="checkbox"][name="lappnum"]').value;
+                const lappnum_str = elm.closest('tr').querySelector('a[name="lappnum_link"]').textContent;
+                if (confirm(`関連出願「${lappnum_str}」を削除してよろしいですか？`)) {
+                    let references = [];
+                    Doclist.references.map(function(row) {
+                        if (row.lappnum != lappnum) {
+                            references.push(row);
+                        }
+                    });
+                    Doclist.references = references;
+                    Doclist.__referencesHTML();
+                }
+            });
+        });
+    }
+}
+
+/**
+ * OPD書類一括ダウンロード
+ */
+Doclist.opdDownload = function(pubnum, mode) {
+    // ボタン無効化
+    Doclist.__showDownloadBulkStatus(null, 'opd');
+    // 引用文献一括ダウンロード処理開始
+    const callback_func = {
+        'done': function(response) {
+            response.json().then(function(jsondata) {
+                Doclist.__showDownloadBulkStatus(jsondata, 'opd');
+            });
+        },
+        'fail': function(err) {
+            // エラーは終了
+            Doclist.__showDownloadBulkStatus({status: 'error'}, 'opd');
+        },
+    }
+    APIFetch.async_post(URL_OPD_BULK_STATUS, {'pubnum': pubnum, 'mode': mode}, callback_func);
+}
+
+/**
+ * OPD書類一括ダウンロード > 生成状況問合せ
+ * @param {string} hashkey ダウンロードキー
+ */
+Doclist.__checkOpdBulkStatus = function(hashkey) {
+    const callback_func = {
+        'done': function(response) {
+            response.json().then(function(jsondata) {
+                Doclist.__showDownloadBulkStatus(jsondata, 'opd');
+            });
+        },
+        'fail': function(err) {
+            // エラーは終了
+            Doclist.__showDownloadBulkStatus({status: 'error'}, 'opd');
+        },
+    }
+    APIFetch.async_get(URL_OPD_BULK_STATUS + `?hashkey=${hashkey}`, callback_func);
+}
+
+/**
+ * イベント割り当て.
+ */
+window.onload = function() {
+    // --- metaタグ読み込み & 一族出願のデータを保持 ---
+    Doclist.init();
+    // --- イベント追加 ---
+    const link_lappnum = document.querySelector("#lappnum");
+    if (link_lappnum) {
+        link_lappnum.addEventListener('click', Doclist.click_lappnum_link);
+    }
+    document.querySelectorAll("a[data-content-id]").forEach(el => el.addEventListener('click', Doclist.click_content_link));
+    document.querySelectorAll(".checkall").forEach(el => el.addEventListener('change', Doclist.change_checked_all));
+    // 一族出願
+    document.querySelector('div.tbl_bunkatu table thead input[data-elm="bunkatu_checkall"]').addEventListener('change', Doclist.__toggleCheckAll);
+    document.querySelectorAll('div.tbl_bunkatu table tbody input[type="checkbox"][name="lappnum"]').forEach(function(elm) { elm.addEventListener('change', Doclist.__toggleCheck); });
+    Doclist.__toggleCheck({'target': document.querySelector('div.tbl_bunkatu table tbody input[type="checkbox"][name="lappnum"]')});
+    // 関連出願
+    document.querySelector('div.tbl_references button[data-elm="show_references"]').addEventListener('click', Doclist.showReferences);
+    document.querySelector('div.tbl_references button[data-elm="add_references"]').addEventListener('click', Doclist.addReferences);
+    document.querySelector('div.tbl_references table thead input[data-elm="references_checkall"]').addEventListener('click', Doclist.__toggleCheckAll);
+    Doclist.__toggleCheck({'target': document.querySelector('div.tbl_references table tbody input[type="checkbox"][name="lappnum"]')});
+    // 他庁公開情報
+    if (document.querySelector('div.tbl_others table')) {
+        document.querySelector('div.tbl_others table thead input[data-elm="others_checkall"]').addEventListener('change', Doclist.__toggleCheckAll);
+        document.querySelectorAll('div.tbl_others table tbody input[type="checkbox"][name="pubnum"]').forEach(function(elm) { elm.addEventListener('change', Doclist.__toggleCheck); });
+        Doclist.__toggleCheck({'target': document.querySelector('div.tbl_others table tbody input[type="checkbox"][name="pubnum"]')});
+        document.querySelectorAll('div.tbl_others table tbody button[data-elm="opd_bulk_individual"]').forEach(function(elm) {
+            elm.addEventListener('click', function(event) {
+                const pubnum = event.target.closest('tr').querySelector('input[type="checkbox"][name="pubnum"]').value;
+                Doclist.opdDownload(pubnum, 'individual');
+            });
+        });
+        document.querySelectorAll('div.tbl_others table tbody button[data-elm="opd_bulk_consolidated"]').forEach(function(elm) {
+            elm.addEventListener('click', function(event) {
+                const pubnum = event.target.closest('tr').querySelector('input[type="checkbox"][name="pubnum"]').value;
+                Doclist.opdDownload(pubnum, 'consolidated');
+            });
+        });
+        document.querySelectorAll('div.tbl_others table tbody a[data-elm="link-evrika"]').forEach(function(elm) {
+            elm.addEventListener('click', function(event) {
+                const pubnum = event.target.closest('tr').querySelector('input[type="checkbox"][name="pubnum"]').value;
+                Doclist.openEvrika([pubnum], `Evrika (${Doclist.lappnum_str}の他庁公開情報)`)
+            });
+        });
+    }
+    // ボタン群
+    document.querySelector("#checker").addEventListener('click', Doclist.checker);
+    document.querySelector("#sophia").addEventListener('click', Doclist.sophia);
+    document.querySelector("#screening").addEventListener('click', Doclist.screening);
+    // ボタン群 > 書類一括DL
+    document.querySelector('button[data-elm="jsv_bulk_individual"]').addEventListener('click', function(event) { Doclist.jsvBulkDownload('individual'); });
+    document.querySelector('button[data-elm="jsv_bulk_consolidated"]').addEventListener('click', function(event) { Doclist.jsvBulkDownload('consolidated'); });
+    // ボタン群 > 引用文献一括DL
+    document.querySelector('button[data-elm="citation_bulk_individual"]').addEventListener('click', function(event) { Doclist.citationDownload('individual'); });
+    document.querySelector('button[data-elm="citation_bulk_consolidated"]').addEventListener('click', function(event) { Doclist.citationDownload('consolidated'); });
+    // チェック状態に応じたボタンの有効|無効切り替え
+    Doclist.__toggleEnabledButton();
+}
