@@ -6,10 +6,15 @@
 
 | プロジェクト | プロファイル | 内容 |
 |---|---|---|
-| [`document_downloader/`](document_downloader/README.md) | 軽量版 | JPO 文書一覧ページから、国内書類（テキスト / HTML / 画像 / PDF / 印刷）と OPD 書類（他庁公開情報）を一括保存するブックマークレット |
+| [`document_downloader/`](document_downloader/README.md) | 軽量版 | JPO 文書一覧ページから、国内書類（テキスト / HTML / 画像 / PDF / 印刷）と OPD 書類（他庁公開情報）を一括保存するブックマークレット。ダウンロード後に出願番号ごとへ仕分ける `sort_jpo_downloads.bat` 付き |
 | [`claim_relation_writer/`](claim_relation_writer/README.md) | フル版 | クレームの引用関係（クレームツリー）を解析し、明確性・サポート要件の拒絶理由定型文を生成するツール。ローカル版 UI とブックマークレット版の両方あり |
 | [`blank_note_printer/`](blank_note_printer/README.md) | 軽量版 | JPO 文書一覧ページの出願番号から、空白 A4 約 30 枚を印刷して `出願番号_note.pdf` を作るブックマークレット |
 | [`rejection_reason_bookmarklet/`](rejection_reason_bookmarklet/README.md) | フル版 | 拒絶理由通知の全文を解析し、指摘事項（明確性・サポート要件・29条系）を構造化して表形式・別タブレポートで表示するブックマークレット |
+
+**ダウンロードファイルの命名は出願番号を先頭に統一しています**（国内書類 `出願番号_YYYYMMDD_文書名.拡張子` /
+OPD `出願番号_元のZIPファイル名` / 空白ノート `出願番号_note.pdf`）。
+そのため `document_downloader/src/sort_jpo_downloads.bat` が、ダウンロードフォルダを出願番号ごとの
+`HTML` / `TXT` / `PDF` / `IMG` / `OPD` フォルダへまとめて仕分けられます。
 
 ## フォルダ構成
 
@@ -23,11 +28,13 @@ jpo-document-bookmarklet_v2/
 ├── templates/                 … 【共有】新規プロジェクト用の雛形（full/ と lite/。手順: templates/README.md）
 ├── document_downloader/       … 軽量版プロジェクト（+ 生成スクリプトとテスト）
 │   ├── src/bookmarklet/       … collector.js（編集用＝正本）+ collector.bookmarklet.js（1行版・生成物）
+│   ├── src/sort_jpo_downloads.bat … ダウンロードフォルダを出願番号ごとに仕分ける BAT（Windows）
 │   ├── scripts/               … build-bookmarklet.js（1行版の生成。依存ゼロ）
-│   ├── tests/                 … node --test 用（依存ゼロ）
+│   ├── tests/                 … node --test 用（依存ゼロ。BAT は一時フォルダで実行して検証）
 │   └── archive/               … ツール旧世代（v1 / v2 / v3）の退避
 ├── blank_note_printer/        … 軽量版プロジェクト（空白ノート印刷）
 │   ├── src/bookmarklet/       … collector.js（編集用）+ collector.bookmarklet.js（1行版）
+│   ├── tests/                 … node --test 用（依存ゼロ。出願番号取得と1行版の同期を検証）
 │   └── archive/               … （現在は空）
 ├── claim_relation_writer/     … フル版プロジェクト
 │   ├── package.json           … npm test / npm run build:bookmarklets
@@ -60,6 +67,7 @@ jpo-document-bookmarklet_v2/
 
 - **軽量版**（ブックマークレットのみ）: `README.md` + `src/bookmarklet/`（編集用 `X.js` と 1 行版 `X.bookmarklet.js` のペア）+ `archive/`（任意）。ビルドなし・手動反映。
   - 例外: `document_downloader` はソースが大きく手作業での 1 行化が現実的でないため、依存ゼロの `scripts/build-bookmarklet.js`（1 行版の生成）と `tests/`（`node --test`）だけを足しています。ローカル UI もコアモジュール分割も持たないので軽量版のままです。`package.json` は置かず、テストはリポジトリルートから実行します。
+  - `blank_note_printer` も `tests/` だけを足しています（ビルドは無いまま。1 行版が古くならないよう、テストが同じエンコードを再現して同期を検査します）。
 - **フル版**（ローカル UI + ブックマークレット + テスト + ビルド）: 軽量版 + `package.json` + `src/core/` + `src/local/` + `src/bookmarklet/common/`（ビルド元）+ `scripts/` + `tests/` + `examples/` + `docs/`。
 
 命名規約:
@@ -84,5 +92,6 @@ jpo-document-bookmarklet_v2/
 
 - 各プロジェクトに同名の `collector.js` / `collector.bookmarklet.js` がありますが中身は無関係の別物です。検索時はフォルダ名まで確認してください。
 - `claim_relation_writer` の `npm test` は共有の `fixtures/` を読むテストを含むため、リポジトリ全体をチェックアウトした状態で実行してください。
-- `document_downloader` のテストも共有の `fixtures/` を読みます。リポジトリルートから `node --test "document_downloader/tests/*.test.js"` で実行してください（`package.json` なし・依存ゼロ）。
+- `document_downloader` と `blank_note_printer` のテストも共有の `fixtures/` を読みます。リポジトリルートから `node --test "document_downloader/tests/*.test.js"` / `node --test "blank_note_printer/tests/*.test.js"` で実行してください（`package.json` なし・依存ゼロ）。`document_downloader/tests/sort-bat.test.js` は Windows でのみ実行され（それ以外はスキップ）、OS の一時フォルダに作った実験用フォルダで BAT を動かすので本物のダウンロードフォルダには触れません。
+- 新版 JPO ページの出願番号取得（`#lappnum` のリンク文言が「Evrikaでスクリーニング」に変わった問題への対応）は `document_downloader` と `blank_note_printer` の**2 か所に独立実装**があります（「プロジェクト間の独立性」に従った意図的な取り込み）。取得順序を変える場合は両方を確認してください。テスト用の最小 DOM（`tests/minidom.js`）も同様に各プロジェクトへコピーしています。
 - 罫線ツリー記法の解析は `claim_relation_writer/src/core/parser.js` と `rejection_reason_bookmarklet/src/core/claim-tree.js` の**2か所に独立実装**があります（上記「プロジェクト間の独立性」のルールに従った意図的な取り込み）。記法の解釈を変える場合は両方を確認してください。

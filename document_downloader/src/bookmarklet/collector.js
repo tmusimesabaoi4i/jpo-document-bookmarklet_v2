@@ -11,6 +11,11 @@
  * ブックマーク登録用: collector.bookmarklet.js
  *   → node document_downloader/scripts/build-bookmarklet.js で生成（1 行版）
  *
+ * ファイル名の正式規則（ダウンロード後の仕分けもこれ前提）:
+ *   国内書類: 出願番号_YYYYMMDD_文書名.拡張子（画像が複数ページのときのみ末尾 _p001…）
+ *   OPD    : 出願番号_元のZIPファイル名（日付は付けない）
+ *   いずれも先頭は出願番号。src/sort_jpo_downloads.bat はこの先頭だけを見て仕分ける。
+ *
  * 責務分離（節番号）:
  *   1 文字列ユーティリティ / 2 ページ種別の検出 / 3 出願番号の取得
  *   4 国内文書行の収集 / 5 OPD 行の収集 / 6 URL 解決 / 7 ファイル名生成
@@ -137,7 +142,13 @@
     return 'HTTP ' + s;
   }
 
-  /* Content-Disposition から安全にファイル名を取り出す（取れなければ '' ） */
+  /* パス成分（ディレクトリトラバーサル含む）を落として最後の要素だけ残す */
+  function baseNameOf(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/^.*[\\/]/, '').trim();
+  }
+
+  /* Content-Disposition から安全にファイル名を取り出す（取れなければ '' ）。
+   * filename* / filename のどちらでも basename 化 → sanitize の順で処理する。 */
   function parseContentDispositionFilename(header) {
     var h = String(header || '');
     if (!h) return '';
@@ -146,13 +157,14 @@
       var v = star[1].trim().replace(/^"|"$/g, '');
       var mm = /^([^']*)'([^']*)'(.*)$/.exec(v);
       var raw = mm ? mm[3] : v;
-      try { return sanitizeFileName(decodeURIComponent(raw)); } catch (e) { /* 壊れた % は無視 */ }
-      return sanitizeFileName(raw);
+      var decoded = raw;
+      try { decoded = decodeURIComponent(raw); } catch (e) { /* 壊れた % はそのまま扱う */ }
+      var starName = baseNameOf(decoded);
+      return starName ? sanitizeFileName(starName) : '';
     }
     var plain = /filename\s*=\s*("([^"]*)"|([^;]*))/i.exec(h);
     if (plain) {
-      var val = (plain[2] !== undefined ? plain[2] : plain[3] || '').trim();
-      val = val.replace(/^.*[\\/]/, '');
+      var val = baseNameOf((plain[2] !== undefined ? plain[2] : plain[3] || '').trim());
       if (val) return sanitizeFileName(val);
     }
     return '';
@@ -425,15 +437,34 @@
   /* ============================================================
    * 7. ファイル名生成
    * ============================================================ */
-  /* 基本形: 出願番号_文書名(日付) （ラベル指定時のみ先頭に付与） */
+  /* 国内書類の基本形: 出願番号_YYYYMMDD_文書名 （ラベル指定時のみ先頭に付与）。
+   * 出願番号を先頭に固定するのは、ダウンロードフォルダを出願番号で仕分ける
+   * src/sort_jpo_downloads.bat が「ファイル名先頭の出願番号」だけを見るため。 */
   function buildBaseName(parts) {
     var p = parts || {};
-    var stem = sanitizeFileName(p.appNo) + '_' + sanitizeFileName(p.docName) + '(' + sanitizeFileName(p.date) + ')';
+    var stem = sanitizeFileName(p.appNo) + '_' + sanitizeFileName(p.date) + '_' + sanitizeFileName(p.docName);
     if (p.label) stem = sanitizeFileName(p.label) + '_' + stem;
     return stem;
   }
 
-  /* 画像が複数ページのときだけ _p001 形式のページ番号を付ける */
+  /* OPD の基本形: 出願番号_元のZIPファイル名（国内書類と違い日付は付けない）。
+   *   1. JPO が返した元ファイル名（Content-Disposition）を basename 化
+   *   2. Windows で使えない文字を sanitize
+   *   3. 先頭に「出願番号_」を付与（既に付いていれば二重付与しない）
+   * 元ファイル名が取れないときは fallbackName（例: '公開番号.zip'）を使う。 */
+  function buildOpdFileName(appNo, rawName, fallbackName) {
+    var app = sanitizeFileName(appNo);
+    var raw = baseNameOf(rawName);
+    var name = raw ? sanitizeFileName(raw) : sanitizeFileName(baseNameOf(fallbackName) || 'OPD.zip');
+    if (!app || app === 'noname') return name;
+    var prefix = app + '_';
+    if (name.toLowerCase().indexOf(prefix.toLowerCase()) === 0) return name; /* 二重付与の防止 */
+    return prefix + name;
+  }
+
+  /* 基本形（出願番号_YYYYMMDD_文書名）に拡張子を付ける。
+   * 画像が複数ページのときだけ末尾に _p001 形式のページ番号を足す
+   * （1 ページだけの文書に無意味な _p001 を付けないための既存仕様）。 */
   function buildFileName(base, ext, opts) {
     var o = opts || {};
     var stem = String(base || 'document');
@@ -520,7 +551,9 @@
     resolveContentUrlTemplate: resolveContentUrlTemplate,
     opdUrlsFromGlobals: opdUrlsFromGlobals,
     extractOpdUrlsFromSource: extractOpdUrlsFromSource,
+    baseNameOf: baseNameOf,
     buildBaseName: buildBaseName,
+    buildOpdFileName: buildOpdFileName,
     buildFileName: buildFileName,
     createNameRegistry: createNameRegistry,
     htmlToText: htmlToText,
@@ -965,12 +998,11 @@
 
         var res = await fetchWithRetry(url, { method: 'GET' }, ctl);
         if (!res.ok) throw HttpError(res.status);
-        var name = parseContentDispositionFilename(res.headers.get('content-disposition'));
+        var cdName = parseContentDispositionFilename(res.headers.get('content-disposition'));
         var blob = await res.blob();
-        if (!name) {
-          var ext = /pdf/i.test(blob.type) ? 'pdf' : (/zip/i.test(blob.type) ? 'zip' : 'zip');
-          name = sanitizeFileName(env.appNo) + '_OPD_' + sanitizeFileName(target.pubnum) + '_' + mode + '.' + ext;
-        }
+        /* Content-Disposition が無いときのフォールバックも「出願番号_公開番号.拡張子」で揃える */
+        var ext = /pdf/i.test(blob.type) ? 'pdf' : 'zip';
+        var name = buildOpdFileName(env.appNo, cdName, sanitizeFileName(target.pubnum) + '.' + ext);
         name = env.names.take(name);
         /* 「ダウンロード開始」は実際に保存を開始した時点で設定する（完了は検知できない） */
         hooks.state(OPD_STATE.DOWNLOAD_STARTED, name);
@@ -1110,9 +1142,10 @@
     });
   }
 
-  function todayStr() {
+  /* ログ名やラベル例に使う YYYYMMDD（ファイル名中の日付はすべてこの形式に揃える） */
+  function todayYmd() {
     var d = new Date();
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2);
+    return String(d.getFullYear()) + pad(d.getMonth() + 1, 2) + pad(d.getDate(), 2);
   }
 
   /* ============================================================
@@ -1210,8 +1243,8 @@
       '      </div>',
       '      <div class="__sec">',
       '        <div class="__sectitle">ファイル名の先頭ラベル（任意）</div>',
-      '        <input class="__input" id="__label" type="text" placeholder="例: ' + todayStr().replace(/-/g, '') + '_案件A">',
-      '        <div class="__hint">ファイル名は「出願番号_文書名(日付).拡張子」。同名は自動で連番になります。</div>',
+      '        <input class="__input" id="__label" type="text" placeholder="例: ' + todayYmd() + '_案件A">',
+      '        <div class="__hint">ファイル名は国内書類が「出願番号_YYYYMMDD_文書名.拡張子」、OPD が「出願番号_元のZIPファイル名」。同名は自動で連番。ラベルを入れると先頭が出願番号でなくなり sort_jpo_downloads.bat の対象外になります。</div>',
       '      </div>',
       '    </div>',
       '    <div class="__right">',
@@ -1837,7 +1870,7 @@
           pad(t.getHours(), 2) + ':' + pad(t.getMinutes(), 2) + ':' + pad(t.getSeconds(), 2) + '] ' +
           l.level.toUpperCase() + ' ' + l.msg;
       });
-      var name = (saveCfg.label ? sanitizeFileName(saveCfg.label) + '_' : '') + sanitizeFileName(env.appNo) + '_' + todayStr() + '_log.txt';
+      var name = (saveCfg.label ? sanitizeFileName(saveCfg.label) + '_' : '') + sanitizeFileName(env.appNo) + '_' + todayYmd() + '_log.txt';
       await saver.saveBlob(name, new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }));
     });
 

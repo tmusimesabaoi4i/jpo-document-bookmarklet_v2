@@ -12,10 +12,10 @@
 
 | ファイル | 世代 | 取得元ページ | 参照元 |
 |---|---|---|---|
-| `new/経過_特願2022-122252.html` | 新版（現行 UI・`www.beta.jpo.go.jp/main/core/jsv/`） | JPO 経過情報（特願2022-122252）。**他庁公開情報 3 件あり・ダミー行あり** | `document_downloader/tests/collector.test.js`（自動テスト）・手動確認 |
+| `new/経過_特願2022-122252.html` | 新版（現行 UI・`www.beta.jpo.go.jp/main/core/jsv/`） | JPO 経過情報（特願2022-122252）。**他庁公開情報 3 件あり・ダミー行あり** | `document_downloader/tests/collector.test.js`・`blank_note_printer/tests/collector.test.js`（自動テスト）・手動確認 |
 | `new/経過_特願2023-170613.html` | 新版（現行 UI・同上） | JPO 経過情報（特願2023-170613）。**「他庁公開情報はありません」ケース** | 同上 |
 | `new/doclist.js.txt` | 新版（現行 UI・同上） | ページが読み込む `doclist.js` の写し（HTML スナップショットではない） | `document_downloader` の仕様根拠（OPD の生成・ポーリング手順） |
-| `legacy/特願2024-563143_beta.html` | 新版だが 2024 年ごろの UI（`www.beta.jpo.go.jp`） | JPO 文書一覧（特願2024-563143） | `document_downloader/tests/collector.test.js`（後方互換の確認）・`blank_note_printer` の手動動作確認 |
+| `legacy/特願2024-563143_beta.html` | 新版だが 2024 年ごろの UI（`www.beta.jpo.go.jp`） | JPO 文書一覧（特願2024-563143） | `document_downloader/tests/collector.test.js`・`blank_note_printer/tests/collector.test.js`（後方互換の確認）・手動確認 |
 | `legacy/特願2024-563143.html` | 旧版（`gem.prototype.jpo.go.jp/core/docs/`） | 同上（旧版ページ） | 同上 |
 
 #### 新 UI（2026 年）で変わった点

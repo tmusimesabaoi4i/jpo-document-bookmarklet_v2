@@ -41,7 +41,7 @@ test('2023-170613: 請求の範囲・明細書・図面が検出され、日付�
   }
 });
 
-test('2023-170613: 期待どおりのファイル名が生成される', () => {
+test('2023-170613: 期待どおりのファイル名（出願番号_YYYYMMDD_文書名）が生成される', () => {
   const doc = load(F_2023);
   const appNo = CORE.resolveAppNo(doc, {}).appNo;
   const { items } = CORE.collectDocRows(doc);
@@ -50,9 +50,9 @@ test('2023-170613: 期待どおりのファイル名が生成される', () => {
     return CORE.buildFileName(CORE.buildBaseName({ appNo, docName: it.name, date: it.date }), 'html');
   });
   assert.deepEqual(made, [
-    '特願2023-170613_請求の範囲(20230929).html',
-    '特願2023-170613_明細書(20230929).html',
-    '特願2023-170613_図面(20230929).html',
+    '特願2023-170613_20230929_請求の範囲.html',
+    '特願2023-170613_20230929_明細書.html',
+    '特願2023-170613_20230929_図面.html',
   ]);
 });
 
@@ -148,28 +148,65 @@ test('Windows 禁止文字 \\ / : * ? " < > | が安全な文字へ置換され�
     docName: 'A\\B/C:D*E?F"G<H>I|J',
     date: '20230929',
   }), 'txt');
-  assert.equal(name, '特願2023-170613_A_B_C_D_E_F_G_H_I_J(20230929).txt');
+  assert.equal(name, '特願2023-170613_20230929_A_B_C_D_E_F_G_H_I_J.txt');
   assert.equal(/[\\/:*?"<>|]/.test(name.replace(/^[^_]*/, '')), false);
 });
 
 test('複数ページ画像の名前が衝突しない（1 ページなら番号なし）', () => {
   const base = CORE.buildBaseName({ appNo: '特願2023-170613', docName: '図面', date: '20230929' });
-  assert.equal(CORE.buildFileName(base, 'png', { page: 1, pageCount: 1 }), '特願2023-170613_図面(20230929).png');
+  assert.equal(CORE.buildFileName(base, 'png', { page: 1, pageCount: 1 }), '特願2023-170613_20230929_図面.png');
   assert.deepEqual(
     [1, 2, 3].map((p) => CORE.buildFileName(base, 'png', { page: p, pageCount: 3 })),
     [
-      '特願2023-170613_図面(20230929)_p001.png',
-      '特願2023-170613_図面(20230929)_p002.png',
-      '特願2023-170613_図面(20230929)_p003.png',
+      '特願2023-170613_20230929_図面_p001.png',
+      '特願2023-170613_20230929_図面_p002.png',
+      '特願2023-170613_20230929_図面_p003.png',
     ]
+  );
+});
+
+/* 仕様固定: 依頼された正式形をそのままの文字列で検証する（回帰テスト） */
+test('新命名の正式形（出願番号_YYYYMMDD_文書名.拡張子）を固定する', () => {
+  const base = CORE.buildBaseName({
+    appNo: '特願2022-122252', docName: '手続補正書（自発・内容）', date: '20260602',
+  });
+  assert.equal(CORE.buildFileName(base, 'pdf'),  '特願2022-122252_20260602_手続補正書（自発・内容）.pdf');
+  assert.equal(CORE.buildFileName(base, 'html'), '特願2022-122252_20260602_手続補正書（自発・内容）.html');
+  assert.equal(CORE.buildFileName(base, 'txt'),  '特願2022-122252_20260602_手続補正書（自発・内容）.txt');
+
+  const fig = CORE.buildBaseName({ appNo: '特願2022-122252', docName: '図面', date: '20220729' });
+  assert.equal(
+    CORE.buildFileName(fig, 'png', { page: 4, pageCount: 5 }),
+    '特願2022-122252_20220729_図面_p004.png'
+  );
+
+  // 旧命名（出願番号_文書名(日付)）は廃止済み。日付は必ず出願番号の直後に来る
+  assert.equal(/\(\d{8}\)/.test(CORE.buildFileName(base, 'pdf')), false);
+  assert.match(CORE.buildFileName(base, 'pdf'), /^特願2022-122252_20260602_/);
+});
+
+test('fixture の実データからも新命名が組み立てられる', () => {
+  const doc = load(F_2022);
+  const appNo = CORE.resolveAppNo(doc, {}).appNo;
+  const { items } = CORE.collectDocRows(doc);
+  const amend = items.filter((it) => it.name === '手続補正書（自発・内容）' && it.date === '20260602');
+  assert.equal(amend.length, 1, 'fixture に 20260602 の手続補正書がない');
+  assert.equal(
+    CORE.buildFileName(CORE.buildBaseName({ appNo, docName: amend[0].name, date: amend[0].date }), 'pdf'),
+    '特願2022-122252_20260602_手続補正書（自発・内容）.pdf'
+  );
+  const fig = items.find((it) => it.name === '図面');
+  assert.equal(
+    CORE.buildFileName(CORE.buildBaseName({ appNo, docName: fig.name, date: fig.date }), 'png', { page: 4, pageCount: 6 }),
+    '特願2022-122252_20220729_図面_p004.png'
   );
 });
 
 test('同名ファイルは連番になり上書きされない', () => {
   const reg = CORE.createNameRegistry();
-  assert.equal(reg.take('特願2023-170613_図面(20230929).png'), '特願2023-170613_図面(20230929).png');
-  assert.equal(reg.take('特願2023-170613_図面(20230929).png'), '特願2023-170613_図面(20230929)_2.png');
-  assert.equal(reg.take('特願2023-170613_図面(20230929).png'), '特願2023-170613_図面(20230929)_3.png');
+  assert.equal(reg.take('特願2023-170613_20230929_図面.png'), '特願2023-170613_20230929_図面.png');
+  assert.equal(reg.take('特願2023-170613_20230929_図面.png'), '特願2023-170613_20230929_図面_2.png');
+  assert.equal(reg.take('特願2023-170613_20230929_図面.png'), '特願2023-170613_20230929_図面_3.png');
   // 大文字小文字は Windows 同様に同一視する
   assert.equal(reg.take('LOG.TXT'), 'LOG.TXT');
   assert.equal(reg.take('log.txt'), 'log_2.txt');
@@ -178,7 +215,7 @@ test('同名ファイルは連番になり上書きされない', () => {
 test('ラベル指定時だけ先頭に付く', () => {
   assert.equal(
     CORE.buildBaseName({ appNo: '特願2023-170613', docName: '図面', date: '20230929', label: '案件A' }),
-    '案件A_特願2023-170613_図面(20230929)'
+    '案件A_特願2023-170613_20230929_図面'
   );
 });
 
@@ -224,10 +261,80 @@ test('Content-Disposition からファイル名を安全に取り出す', () => 
     CORE.parseContentDispositionFilename("attachment; filename*=UTF-8''%E5%9B%B3%E9%9D%A2.pdf"),
     '図面.pdf'
   );
-  // パス区切りを含む値でもディレクトリを外して安全化する
+  // パス区切りを含む値でもディレクトリを外して安全化する（filename / filename* の両方）
   assert.equal(CORE.parseContentDispositionFilename('attachment; filename="../../etc/passwd"'), 'passwd');
+  assert.equal(
+    CORE.parseContentDispositionFilename("attachment; filename*=UTF-8''..%2F..%2Fetc%2Fpasswd"),
+    'passwd'
+  );
   assert.equal(CORE.parseContentDispositionFilename(''), '');
   assert.equal(CORE.parseContentDispositionFilename(null), '');
+});
+
+/* ============================================================
+ * OPD のファイル名（出願番号_元のZIPファイル名 / 日付は付けない）
+ * ============================================================ */
+test('OPD: Content-Disposition がある場合は 出願番号_元ファイル名 になる', () => {
+  const raw = CORE.parseContentDispositionFilename('attachment; filename="EP4312460A1.zip"');
+  assert.equal(raw, 'EP4312460A1.zip');
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', raw, 'EP4312460A1.zip'),
+    '特願2022-122252_EP4312460A1.zip'
+  );
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', 'US20240040620A1.zip', 'US20240040620A1.zip'),
+    '特願2022-122252_US20240040620A1.zip'
+  );
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', 'WO2024012345A1.zip', 'WO2024012345A1.zip'),
+    '特願2022-122252_WO2024012345A1.zip'
+  );
+});
+
+test('OPD: Content-Disposition が無い場合は 出願番号_公開番号.zip にフォールバックする', () => {
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', CORE.parseContentDispositionFilename(''), 'EP4312460A1.zip'),
+    '特願2022-122252_EP4312460A1.zip'
+  );
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', null, 'US20260181694A1.zip'),
+    '特願2022-122252_US20260181694A1.zip'
+  );
+});
+
+test('OPD: 不正文字・パス成分を含む filename も basename 化して安全化する', () => {
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', 'sub/dir\\EP*4312460?A1"<>|.zip', 'EP4312460A1.zip'),
+    '特願2022-122252_EP_4312460_A1____.zip'
+  );
+  // Content-Disposition 経由でも同じ結果になる
+  assert.equal(
+    CORE.buildOpdFileName(
+      '特願2022-122252',
+      CORE.parseContentDispositionFilename('attachment; filename="../../etc/EP4312460A1.zip"'),
+      'EP4312460A1.zip'
+    ),
+    '特願2022-122252_EP4312460A1.zip'
+  );
+});
+
+test('OPD: 既に出願番号が付いている場合は二重付与しない', () => {
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', '特願2022-122252_EP4312460A1.zip', 'EP4312460A1.zip'),
+    '特願2022-122252_EP4312460A1.zip'
+  );
+  // フォールバック側に既に付いていても同じ
+  assert.equal(
+    CORE.buildOpdFileName('特願2022-122252', '', '特願2022-122252_EP4312460A1.zip'),
+    '特願2022-122252_EP4312460A1.zip'
+  );
+});
+
+test('OPD: 命名に日付を混ぜない（国内書類との違いを固定する）', () => {
+  const name = CORE.buildOpdFileName('特願2022-122252', 'EP4312460A1.zip', 'EP4312460A1.zip');
+  assert.equal(name, '特願2022-122252_EP4312460A1.zip');
+  assert.equal(/^特願2022-122252_\d{8}_/.test(name), false, 'OPD に YYYYMMDD を付けてはいけない');
+  assert.equal(name.indexOf('_OPD_'), -1, 'v4 初期の _OPD_ 中間名は廃止');
 });
 
 /* ============================================================
