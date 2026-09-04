@@ -490,12 +490,18 @@
         const hit = seg > 0 && sourceNumber != null
           ? matcher.resolve(sourceNumber, seg, info.number, info.segmentCount)
           : null;
-        if (hit && info.items[hit.index - 1]) {
-          const el = info.items[hit.index - 1];
-          dom.addClass(el, 'is-selected');
-          selectedElements.push(el);
+        // 対応は 1 対 1 とはかぎらない。返ってきた段落をすべて強調する
+        let marked = 0;
+        if (hit) {
+          for (const index of hit.indexes) {
+            const el = info.items[index - 1];
+            if (!el) continue;
+            dom.addClass(el, 'is-selected');
+            selectedElements.push(el);
+            marked += 1;
+          }
         }
-        const missingHere = seg > 0 && !hit;
+        const missingHere = seg > 0 && marked === 0;
         info.missingEl.textContent = missingHere ? '類似段落なし' : '';
         dom.toggleClass(info.missingEl, 'jcgc-hidden', !missingHere);
       }

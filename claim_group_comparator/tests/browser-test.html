@@ -35,18 +35,34 @@
     </select>
   </label>
   <button type="button" id="h-load">読み込んで比較画面を描く</button>
+  <label>版
+    <select id="h-variant">
+      <option value="auto">自動関連付け版</option>
+      <option value="manual">手動関連付け版</option>
+    </select>
+  </label>
   <label>合成カード数 <input type="number" id="h-count" value="30" min="1" max="100" style="width:5em"></label>
   <button type="button" id="h-synth">合成カードで描く</button>
   <span class="status" id="h-status">準備完了</span>
 </div>
-<!-- 個別モジュールではなく、実運用と同じ連結済みの生成物を読む（ここも同期がずれれば気づける） -->
+<!-- 個別モジュールではなく、実運用と同じ連結済みの生成物を読む（ここも同期がずれれば気づける）。
+     2 つの版は同じ名前空間 JCGC の別プロパティに載るので、両方読んで切り替えられる。 -->
 <script src="../src/bookmarklet/comparator.js" defer></script>
+<script src="../src/bookmarklet/relations.js" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   var status = document.getElementById('h-status');
   // 生成物は読み込みと同時に起動ボタンを置くが、ハーネスでは邪魔なので外す
-  var launcher = document.getElementById('jcgc-launcher');
-  if (launcher && launcher.parentNode) launcher.parentNode.removeChild(launcher);
+  ['jcgc-launcher', 'jcgcr-launcher'].forEach(function (id) {
+    var launcher = document.getElementById(id);
+    if (launcher && launcher.parentNode) launcher.parentNode.removeChild(launcher);
+  });
+
+  // どちらの版を描くか
+  function workspaceModule() {
+    return document.getElementById('h-variant').value === 'manual'
+      ? globalThis.JCGC.relationWorkspace : globalThis.JCGC.workspace;
+  }
   var FIXTURE_BASE = '../../fixtures/claim-checker/new/';
 
   function say(text, isError) {
@@ -58,7 +74,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function renderWorkspace(claims, meta) {
     var harness = document.getElementById('harness');
     var groups = globalThis.JCGC.grouping.autoGroup(claims, { preset: 'broad' }).groups;
-    globalThis.JCGC.workspace.createWorkspace({
+    workspaceModule().createWorkspace({
       doc: document, win: window, claims: claims, autoGroups: groups, preset: 'broad', meta: meta,
       regroup: function (presetKey) {
         return globalThis.JCGC.grouping.autoGroup(claims, { preset: presetKey }).groups;
@@ -112,7 +128,7 @@ document.addEventListener('DOMContentLoaded', function () {
       score: null, reasons: ['レイアウト確認用の合成データ'], manuallyEdited: false, order: 1,
       claimNumbers: claims.map(function (c) { return c.number; }),
     }];
-    globalThis.JCGC.workspace.createWorkspace({
+    workspaceModule().createWorkspace({
       doc: document, win: window, claims: claims, autoGroups: groups, preset: 'broad',
       meta: { sourceLabel: '合成データ' },
       regroup: function () { return groups; },

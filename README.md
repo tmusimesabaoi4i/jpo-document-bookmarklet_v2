@@ -11,7 +11,7 @@
 | [`blank_note_printer/`](blank_note_printer/README.md) | 軽量版 | JPO 文書一覧ページの出願番号から、空白 A4 約 30 枚を印刷して `出願番号_note.pdf` を作るブックマークレット |
 | [`rejection_reason_bookmarklet/`](rejection_reason_bookmarklet/README.md) | フル版 | 拒絶理由通知の全文を解析し、指摘事項（明確性・サポート要件・29条系）を構造化して表形式・別タブレポートで表示するブックマークレット |
 | [`term_marker/`](term_marker/README.md) | 軽量版 | JPO 文書 HTML（請求の範囲・明細書・手続補正書）上で「前記XXXX」の語句を自動抽出し、語句ごとに 25 色で塗り分けるブックマークレット。右上パネルで対応表を編集して再適用、印刷、対応表付き HTML 出力 |
-| [`claim_group_comparator/`](claim_group_comparator/README.md) | フル版 | 書類比較・クレームチェッカーから請求項を取り出し、字面・段落構造・カテゴリー・クレームツリーから比較候補のグループを自動作成して、別タブで並べて見比べるブックマークレット。段落は「同じ番号」ではなく最も似ている段落どうしを同期強調 |
+| [`claim_group_comparator/`](claim_group_comparator/README.md) | フル版 | 書類比較・クレームチェッカーから請求項を取り出し、字面・段落構造・カテゴリー・クレームツリーから比較候補のグループを自動作成して、別タブで並べて見比べるブックマークレット。**2 つの版**があり、段落の対応を自動推定する版（`comparator`）と、利用者が手動で「関連」を作り JSON で保存・復元する版（`relations`）を選べる |
 
 **ダウンロードファイルの命名は出願番号を先頭に統一しています**（国内書類 `出願番号_YYYYMMDD_文書名.拡張子` /
 OPD `出願番号_元のZIPファイル名` / 空白ノート `出願番号_note.pdf`）。
@@ -59,7 +59,7 @@ jpo-document-bookmarklet_v2/
     ├── src/core/              … DOM 非依存のコア（正規化・引用解析・ツリー・類似度・グルーピング・段落対応・状態・レイアウト・設定）
     ├── src/extract/           … クレームチェッカーとの接続部分（ここだけがページの DOM を知る）
     ├── src/view/              … 比較タブの画面（別タブへ DOM API だけで描画）
-    ├── src/bookmarklet/       … common/launcher-app.js（編集用）+ comparator*.js（生成物）
+    ├── src/bookmarklet/       … common/*-launcher-app.js（編集用）+ comparator*.js / relations*.js（生成物・2版）
     ├── scripts/               … build-bookmarklets.js（1行版の生成。依存ゼロ）
     ├── tests/                 … node --test 用（fixtures/claim-checker と人工データの両方で検証）
     └── docs/                  … 設計メモ
@@ -71,7 +71,7 @@ jpo-document-bookmarklet_v2/
 - **拒絶理由の定型文を作りたい** → `claim_relation_writer/src/local/index.html` をブラウザで開くだけ（詳細は [claim_relation_writer/README.md](claim_relation_writer/README.md)）
 - **空白ノート PDF（`出願番号_note.pdf`）を作りたい** → `blank_note_printer/src/bookmarklet/collector.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け（詳細は [blank_note_printer/README.md](blank_note_printer/README.md)）
 - **請求項の「前記〜」語句を色分けして読みたい** → `term_marker/src/bookmarklet/marker.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け、文書 HTML 上で実行（詳細は [term_marker/README.md](term_marker/README.md)）
-- **似ている請求項を並べて文言差を探したい** → `claim_group_comparator/src/bookmarklet/comparator.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け、クレーム解析後の書類比較・クレームチェッカー上で実行（詳細は [claim_group_comparator/README.md](claim_group_comparator/README.md)）
+- **似ている請求項を並べて文言差を探したい** → `claim_group_comparator/src/bookmarklet/comparator.bookmarklet.js`（段落の対応を自動推定）または `relations.bookmarklet.js`（段落の対応を手動設定・JSON 保存）の中身をブラウザのブックマーク URL 欄に貼り付け、クレーム解析後の書類比較・クレームチェッカー上で実行（詳細は [claim_group_comparator/README.md](claim_group_comparator/README.md)）
 
 ## 共有リソースと用語
 
