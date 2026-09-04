@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>claim_group_comparator — ブラウザ確認用ハーネス</title>
+<style>
+  body { margin: 0; font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
+  #harness { padding: 8px 12px; background: #eef2f5; border-bottom: 2px solid #94a9b8;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+  #harness select, #harness button, #harness input { font: inherit; padding: 3px 6px; }
+  #harness .status { color: #444; }
+  #harness .error { color: #a4442c; }
+</style>
+</head>
+<body>
+<!--
+  ブラウザ確認用ハーネス（テスト資産。ブックマークレット本体には含まれない）
+
+  比較タブ（window.open した about:blank）は拡張機能やスクリーンショットから触れないことがあるため、
+  同じ描画コード（JCGC.workspace.createWorkspace）をこのページ自身へ描いて、実ブラウザでの
+  見た目・折り返し・段落同期・操作性を確認する。
+
+  使い方（fetch のため file:// ではなく HTTP で開くこと）:
+    リポジトリのルートで簡易サーバを立て、
+      /claim_group_comparator/tests/browser-test.html
+    を開く。fixtures を読み込むか、合成カード（1〜100枚）でレイアウトを確認する。
+-->
+<div id="harness">
+  <label>fixture
+    <select id="h-fixture">
+      <option value="書類比較・クレームチェッカー_特願2025-557557.html">特願2025-557557（並行ツリー・24項）</option>
+      <option value="書類比較・クレームチェッカー_特願2024-203062.html">特願2024-203062（1・29・30・30項）</option>
+      <option value="書類比較・クレームチェッカー_特願2024-536222.html">特願2024-536222（多カテゴリー・43項）</option>
+      <option value="書類比較・クレームチェッカー_引用パターン上限到達.html">上限到達（92項）</option>
+    </select>
+  </label>
+  <button type="button" id="h-load">読み込んで比較画面を描く</button>
+  <label>合成カード数 <input type="number" id="h-count" value="30" min="1" max="100" style="width:5em"></label>
+  <button type="button" id="h-synth">合成カードで描く</button>
+  <span class="status" id="h-status">準備完了</span>
+</div>
+<!-- 個別モジュールではなく、実運用と同じ連結済みの生成物を読む（ここも同期がずれれば気づける） -->
+<script src="../src/bookmarklet/comparator.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var status = document.getElementById('h-status');
+  // 生成物は読み込みと同時に起動ボタンを置くが、ハーネスでは邪魔なので外す
+  var launcher = document.getElementById('jcgc-launcher');
+  if (launcher && launcher.parentNode) launcher.parentNode.removeChild(launcher);
+  var FIXTURE_BASE = '../../fixtures/claim-checker/new/';
+
+  function say(text, isError) {
+    status.textContent = text;
+    status.className = isError ? 'error' : 'status';
+  }
+
+  // 比較画面はページ全体を作り替えるので、ハーネスの操作列だけ退避して戻す
+  function renderWorkspace(claims, meta) {
+    var harness = document.getElementById('harness');
+    var groups = globalThis.JCGC.grouping.autoGroup(claims, { preset: 'broad' }).groups;
+    globalThis.JCGC.workspace.createWorkspace({
+      doc: document, win: window, claims: claims, autoGroups: groups, preset: 'broad', meta: meta,
+      regroup: function (presetKey) {
+        return globalThis.JCGC.grouping.autoGroup(claims, { preset: presetKey }).groups;
+      },
+    });
+    document.body.insertBefore(harness, document.body.firstChild);
+    say(claims.length + '請求項 / ' + groups.length + 'グループを描画しました');
+    return groups;
+  }
+
+  document.getElementById('h-load').addEventListener('click', function () {
+    var name = document.getElementById('h-fixture').value;
+    say('読み込み中: ' + name);
+    fetch(FIXTURE_BASE + encodeURIComponent(name))
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (html) {
+        var parsed = new DOMParser().parseFromString(html, 'text/html');
+        var result = globalThis.JCGC.extractor.extractClaims(parsed);
+        if (!result.ok) { say(result.message, true); return; }
+        renderWorkspace(result.claims, { lappnum: name, sourceLabel: result.source });
+      })
+      .catch(function (e) { say('読み込み失敗: ' + e.message + '（HTTP で開いていますか）', true); });
+  });
+
+  document.getElementById('h-synth').addEventListener('click', function () {
+    var count = Math.max(1, Math.min(100, Number(document.getElementById('h-count').value) || 1));
+    var claims = [];
+    for (var i = 1; i <= count; i += 1) {
+      var segCount = 3 + (i % 4);
+      var parts = [];
+      for (var s = 1; s <= segCount; s += 1) {
+        parts.push('　請求項' + i + 'の第' + s + '段落です。無線通信ネットワークに対して信号を送受信するように構成される'
+          + '中継ノードとして機能する中継通信デバイスを動作させる手順を含む記載がここに入ります。');
+      }
+      var text = parts.join('');
+      var segments = globalThis.JCGC.segment.splitSegments(text);
+      claims.push({
+        number: i, rawText: text, segments: segments, segmentCount: segments.length,
+        citations: i === 1 ? [] : [1], textCitations: i === 1 ? [] : [1], citationSource: 'synthetic',
+        isIndependent: i === 1, categoryLabel: '方法', categoryKey: 'method', categoryGroupLabel: '方法',
+        termClasses: [], terms: [],
+        normalized: globalThis.JCGC.normalize.normalizeForCompare(text, { claimNumber: i }),
+        normalizedSegments: segments.map(function (seg) {
+          return globalThis.JCGC.normalize.normalizeSegment(seg.text, { claimNumber: i });
+        }),
+      });
+    }
+    var harness = document.getElementById('harness');
+    var groups = [{
+      id: 'synthetic', name: '合成カード ' + count + '枚', source: 'manual', strategy: 'manual',
+      score: null, reasons: ['レイアウト確認用の合成データ'], manuallyEdited: false, order: 1,
+      claimNumbers: claims.map(function (c) { return c.number; }),
+    }];
+    globalThis.JCGC.workspace.createWorkspace({
+      doc: document, win: window, claims: claims, autoGroups: groups, preset: 'broad',
+      meta: { sourceLabel: '合成データ' },
+      regroup: function () { return groups; },
+    });
+    document.body.insertBefore(harness, document.body.firstChild);
+    say(count + '枚のカードを描画しました');
+  });
+});
+</script>
+</body>
+</html>

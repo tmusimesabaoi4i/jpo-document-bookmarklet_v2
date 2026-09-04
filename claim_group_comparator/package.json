@@ -1,0 +1,10 @@
+{
+  "name": "claim-group-comparator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "書類比較・クレームチェッカー上で請求項をグルーピングし、別タブで見比べるブックマークレット（完全ローカル・依存ゼロ）",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "build:bookmarklets": "node scripts/build-bookmarklets.js"
+  }
+}

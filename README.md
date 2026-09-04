@@ -11,6 +11,7 @@
 | [`blank_note_printer/`](blank_note_printer/README.md) | 軽量版 | JPO 文書一覧ページの出願番号から、空白 A4 約 30 枚を印刷して `出願番号_note.pdf` を作るブックマークレット |
 | [`rejection_reason_bookmarklet/`](rejection_reason_bookmarklet/README.md) | フル版 | 拒絶理由通知の全文を解析し、指摘事項（明確性・サポート要件・29条系）を構造化して表形式・別タブレポートで表示するブックマークレット |
 | [`term_marker/`](term_marker/README.md) | 軽量版 | JPO 文書 HTML（請求の範囲・明細書・手続補正書）上で「前記XXXX」の語句を自動抽出し、語句ごとに 25 色で塗り分けるブックマークレット。右上パネルで対応表を編集して再適用、印刷、対応表付き HTML 出力 |
+| [`claim_group_comparator/`](claim_group_comparator/README.md) | フル版 | 書類比較・クレームチェッカーから請求項を取り出し、字面・段落構造・カテゴリー・クレームツリーから比較候補のグループを自動作成して、別タブで並べて見比べるブックマークレット。段落は「同じ番号」ではなく最も似ている段落どうしを同期強調 |
 
 **ダウンロードファイルの命名は出願番号を先頭に統一しています**（国内書類 `出願番号_YYYYMMDD_文書名.拡張子` /
 OPD `出願番号_元のZIPファイル名` / 空白ノート `出願番号_note.pdf`）。
@@ -49,10 +50,18 @@ jpo-document-bookmarklet_v2/
 │   ├── examples/              … ロジックのゴールデンケース
 │   └── docs/                  … 詳細仕様書
 ├── rejection_reason_bookmarklet/ … フル版プロジェクト（拒絶理由通知の解析・可視化。構成は同上）
-└── term_marker/               … 軽量版プロジェクト（「前記XXXX」語句カラーマーキング）
-    ├── src/bookmarklet/       … marker.js（編集用＝正本）+ marker.bookmarklet.js（1行版・生成物）
-    ├── scripts/               … build-bookmarklet.js（1行版の生成。依存ゼロ）
-    ├── tests/                 … node --test 用（依存ゼロ。fixtures/document-html を読む）
+├── term_marker/               … 軽量版プロジェクト（「前記XXXX」語句カラーマーキング）
+│   ├── src/bookmarklet/       … marker.js（編集用＝正本）+ marker.bookmarklet.js（1行版・生成物）
+│   ├── scripts/               … build-bookmarklet.js（1行版の生成。依存ゼロ）
+│   ├── tests/                 … node --test 用（依存ゼロ。fixtures/document-html を読む）
+│   └── docs/                  … 設計メモ
+└── claim_group_comparator/    … フル版プロジェクト（請求項グループ比較）
+    ├── src/core/              … DOM 非依存のコア（正規化・引用解析・ツリー・類似度・グルーピング・段落対応・状態・レイアウト・設定）
+    ├── src/extract/           … クレームチェッカーとの接続部分（ここだけがページの DOM を知る）
+    ├── src/view/              … 比較タブの画面（別タブへ DOM API だけで描画）
+    ├── src/bookmarklet/       … common/launcher-app.js（編集用）+ comparator*.js（生成物）
+    ├── scripts/               … build-bookmarklets.js（1行版の生成。依存ゼロ）
+    ├── tests/                 … node --test 用（fixtures/claim-checker と人工データの両方で検証）
     └── docs/                  … 設計メモ
 ```
 
@@ -62,6 +71,7 @@ jpo-document-bookmarklet_v2/
 - **拒絶理由の定型文を作りたい** → `claim_relation_writer/src/local/index.html` をブラウザで開くだけ（詳細は [claim_relation_writer/README.md](claim_relation_writer/README.md)）
 - **空白ノート PDF（`出願番号_note.pdf`）を作りたい** → `blank_note_printer/src/bookmarklet/collector.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け（詳細は [blank_note_printer/README.md](blank_note_printer/README.md)）
 - **請求項の「前記〜」語句を色分けして読みたい** → `term_marker/src/bookmarklet/marker.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け、文書 HTML 上で実行（詳細は [term_marker/README.md](term_marker/README.md)）
+- **似ている請求項を並べて文言差を探したい** → `claim_group_comparator/src/bookmarklet/comparator.bookmarklet.js` の中身をブラウザのブックマーク URL 欄に貼り付け、クレーム解析後の書類比較・クレームチェッカー上で実行（詳細は [claim_group_comparator/README.md](claim_group_comparator/README.md)）
 
 ## 共有リソースと用語
 
@@ -101,6 +111,7 @@ jpo-document-bookmarklet_v2/
 - 各プロジェクトに同名の `collector.js` / `collector.bookmarklet.js` がありますが中身は無関係の別物です。検索時はフォルダ名まで確認してください。
 - `claim_relation_writer` の `npm test` は共有の `fixtures/` を読むテストを含むため、リポジトリ全体をチェックアウトした状態で実行してください。
 - `term_marker` のテストは共有の `fixtures/document-html/` を読みます。リポジトリルートから `node --test "term_marker/tests/*.test.js"` で実行してください（`package.json` なし・依存ゼロ）。
+- `claim_group_comparator` のテストも共有の `fixtures/claim-checker/` を読みます。リポジトリルートから `node --test "claim_group_comparator/tests/*.test.js"`（または同フォルダで `npm test`）で実行してください。fixtures を読まない人工データのテスト（`tests/generic.test.js`）が別にあり、案件に依存しないことはそちらで検査します。
 - `document_downloader` と `blank_note_printer` のテストも共有の `fixtures/` を読みます。リポジトリルートから `node --test "document_downloader/tests/*.test.js"` / `node --test "blank_note_printer/tests/*.test.js"` で実行してください（`package.json` なし・依存ゼロ）。`document_downloader/tests/sort-bat.test.js` は Windows でのみ実行され（それ以外はスキップ）、OS の一時フォルダに作った実験用フォルダで BAT を動かすので本物のダウンロードフォルダには触れません。
 - 新版 JPO ページの出願番号取得（`#lappnum` のリンク文言が「Evrikaでスクリーニング」に変わった問題への対応）は `document_downloader` と `blank_note_printer` の**2 か所に独立実装**があります（「プロジェクト間の独立性」に従った意図的な取り込み）。取得順序を変える場合は両方を確認してください。テスト用の最小 DOM（`tests/minidom.js`）も同様に各プロジェクトへコピーしています。
 - 罫線ツリー記法の解析は `claim_relation_writer/src/core/parser.js` と `rejection_reason_bookmarklet/src/core/claim-tree.js` の**2か所に独立実装**があります（上記「プロジェクト間の独立性」のルールに従った意図的な取り込み）。記法の解釈を変える場合は両方を確認してください。
