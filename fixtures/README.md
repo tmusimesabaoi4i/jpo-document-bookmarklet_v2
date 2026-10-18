@@ -14,6 +14,7 @@
 |---|---|---|---|
 | `new/経過_特願2022-122252.html` | 新版（現行 UI・`www.beta.jpo.go.jp/main/core/jsv/`） | JPO 経過情報（特願2022-122252）。**他庁公開情報 3 件あり・ダミー行あり** | `document_downloader/tests/collector.test.js`・`blank_note_printer/tests/collector.test.js`（自動テスト）・手動確認 |
 | `new/経過_特願2023-170613.html` | 新版（現行 UI・同上） | JPO 経過情報（特願2023-170613）。**「他庁公開情報はありません」ケース** | 同上 |
+| `new/経過_特願2025-557197.html` | 新版（現行 UI・同上、2026 年取得） | JPO 経過情報（特願2025-557197）。**国内書類 22 件・OPD 2 件（CN / WO）** | `document_downloader/tests/collector.test.js`・`blank_note_printer/tests/collector.test.js`（自動テスト）・手動確認 |
 | `new/doclist.js.txt` | 新版（現行 UI・同上） | ページが読み込む `doclist.js` の写し（HTML スナップショットではない） | `document_downloader` の仕様根拠（OPD の生成・ポーリング手順） |
 | `legacy/特願2024-563143_beta.html` | 新版だが 2024 年ごろの UI（`www.beta.jpo.go.jp`） | JPO 文書一覧（特願2024-563143） | `document_downloader/tests/collector.test.js`・`blank_note_printer/tests/collector.test.js`（後方互換の確認）・手動確認 |
 | `legacy/特願2024-563143.html` | 旧版（`gem.prototype.jpo.go.jp/core/docs/`） | 同上（旧版ページ） | 同上 |
@@ -50,6 +51,7 @@ DOM が変わっています。ブックマークレットが壊れた原因そ�
 | `new/書類比較・クレームチェッカー_特願2025-557557.html` | 新版（同上、`?lappnum=12025557557`） | 同上（**独立項 3 本が同形のサブツリーを持つケース**・24請求項。装置クレームにだけ構成の段落が 1 つ多い） | `claim_group_comparator/tests/`（自動テスト）・手動確認 |
 | `new/書類比較・クレームチェッカー_特願2024-203062.html` | 新版（同上、`?lappnum=12024203062`） | 同上（**カテゴリー違いの独立項 3 本**＝プログラム／制御方法／情報処理装置・30請求項） | 同上 |
 | `new/書類比較・クレームチェッカー_特願2024-536222.html` | 新版（同上、`?lappnum=12024536222`） | 同上（**独立項 15 本・方法/装置/回路の多カテゴリー**・43請求項。引用先の違う従属項に酷似した記載がある） | 同上 |
+| `new/書類比較・クレームチェッカー_特願2025-557197.html` | 新版（同上、`?lappnum=12025557197`、**2026 年の新 DOM**） | 同上（20請求項・独立項 1,17・方法/装置。引用一覧が「直接＋間接の全引用元」形式） | `claim_relation_writer/tests/bookmarklet.test.js`・`rejection_reason_bookmarklet/tests/new-ui-fixture.test.js`・`claim_group_comparator/tests/extractor.test.js`（自動テスト）・手動確認 |
 | `legacy/書類比較・クレームチェッカー.html` | 旧版 `gem.prototype.jpo.go.jp`（`/core/docs/checker/`） | 同上 | 同上 |
 
 `_特願2025-557557` / `_特願2024-203062` / `_特願2024-536222` の 3 件は、`claim_group_comparator`
@@ -64,6 +66,25 @@ DOM が変わっています。ブックマークレットが壊れた原因そ�
 ただし、これらは「実際の DOM と複雑な請求項」を確かめるための資料であり、
 `claim_group_comparator` の中心処理はこれらの請求項番号・技術用語に依存していません
 （人工データによる検証は同プロジェクトの `tests/generic.test.js`）。
+
+#### 新 UI（2026 年）で変わった点（_特願2025-557197）
+
+`_特願2025-557197` は、従来の new スナップショット（`_特願2025-557557` など）と同じ
+`www.beta.jpo.go.jp` 系でありながら、クレーム解析結果の DOM が変わっています。
+ブックマークレットが壊れた原因そのものなので、旧 new スナップショットと両方を残しています。
+
+- `#claim_mark` の請求項境界が `<span id="CLMNM1">` から
+  **`<span class="claim_num" id="claim1"><b>【請求項 1】</b></span>`** に変わった。
+- 表示用番号（`[1-1]` 等）のマーカーが `<span class="showCiteCited">` から
+  **`<span class="cited_word">` / `<span class="jump_link show_word">`** に変わった。
+- 用語を包む `zenki_wdXX` クラスが**無くなった**（字面と引用関係だけで比較する縮退動作になる）。
+- `#claim_cite` の各請求項が `<br>` 区切りから **`<div>` 区切り**になった。
+- `#claim_cite` の「引用請求項」が**直接引用元だけ**から
+  **直接＋間接の全引用元**（例: `引用請求項： 1,2（うち間接引用: 1）`）に変わった。
+  間接分を差し引かないと、直接引用元を誤る（請求項 4 の直接引用元は 2 のみ）。
+
+`#claim_tree` の罫線ツリー、`#claim_cite` の請求項数・独立請求項・カテゴリー末尾語は
+従来と同じ形式で読めます。
 
 claim-checker の新版/旧版は 219 行の機械比較で、差異が保存元 URL・保存フォルダ名・保存時のインライン px 値のみであることを確認済みです（DOM 構造は同一）。`_特願2024-203064` 版も既存 new 版と機械比較済みで、差異は保存元出願番号・保存フォルダ名・出願データ部分のみです（DOM 構造は同一。既存テストが参照する `new/書類比較・クレームチェッカー.html` は変更していません）。
 

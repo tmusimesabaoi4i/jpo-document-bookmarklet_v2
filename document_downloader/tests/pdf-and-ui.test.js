@@ -105,6 +105,18 @@ test('UI: 国内書類の出力形式に PDF と印刷が両方ある（印刷�
   assert.equal(typeof CORE.buildImagePdf, 'function');
 });
 
+test('UI: OPD 行ごとの一括DL可否を反映する（新 UI のボタン無し行）', () => {
+  // ページの行にボタンがあるかを opdHasAny / opdSupports で判定する
+  assert.match(SRC, /function opdHasAny\(it\)\s*\{[\s\S]*?hasIndividual \|\| it\.hasConsolidated/);
+  assert.match(SRC, /function opdSupports\(it, mode\)\s*\{/);
+  // 既定選択は「どちらかのボタンがある行」だけ
+  assert.match(SRC, /opdSelected\[it\.key\] = opdHasAny\(it\)/);
+  // 選択モードに対応しない行は実行対象から外す
+  assert.match(SRC, /opdSelected\[it\.key\] && opdSupports\(it, mode\)/);
+  // 非対応行のチェックボックスは無効化する
+  assert.match(SRC, /\(can \? '' : ' disabled'\)/);
+});
+
 test('UI: 状態バッジの CSS クラスが状態モデルと 1 対 1 で存在する', () => {
   for (const key of Object.keys(CORE.OPD_STATE)) {
     const cls = CORE.OPD_STATE_META[key].cls;

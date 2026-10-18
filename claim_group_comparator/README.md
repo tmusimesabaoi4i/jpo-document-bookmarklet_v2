@@ -226,7 +226,7 @@ claim_group_comparator/
 
 | 層 | 役割 | 案件依存 |
 |---|---|---|
-| `src/extract/extractor.js` | **クレームチェッカーとの接続部分**。`#claim_mark` / `CLMNM<n>` / `#claim_cite` / `zenki_wdXX` / `#doc1` という**ページの**セレクタを知っているのはここだけ | ページ構造には依存（案件には非依存） |
+| `src/extract/extractor.js` | **クレームチェッカーとの接続部分**。`#claim_mark` / `CLMNM<n>`（旧 UI）/ `span.claim_num`（新 UI）/ `#claim_cite` / `zenki_wdXX`（旧 UI のみ）/ `#doc1` という**ページの**セレクタを知っているのはここだけ | ページ構造には依存（案件には非依存） |
 | `src/core/*` | 上の抽出結果を受け取る汎用データ処理。DOM もページも案件も知らない | 非依存 |
 | `src/view/*` | 汎用データを描画する。請求項の中身を知らない | 非依存 |
 
@@ -241,7 +241,7 @@ claim_group_comparator/
   isIndependent,
   categoryLabel,        // 末尾語そのもの（未知の語でもよい）
   categoryKey,          // カテゴリー系列。表に無い末尾語は末尾語から作る
-  termClasses,          // zenki_wdXX（補助情報）
+  termClasses,          // zenki_wdXX（旧 UI の補助情報。新 UI では空）
   segmentTermClasses,   // 段落ごとの用語クラス
   normalized,           // 比較用（表示には使わない）
   normalizedSegments,
@@ -263,7 +263,11 @@ claim_group_comparator/
 | 書類比較・クレームチェッカー（新版 `www.beta.jpo.go.jp/main/core/checker/`） | [`fixtures/claim-checker/new/`](../fixtures/claim-checker/new/) |
 | 同（旧版 `gem.prototype.jpo.go.jp/core/docs/checker/`） | [`fixtures/claim-checker/legacy/`](../fixtures/claim-checker/legacy/) |
 
-新版・旧版で DOM 構造は同一（`fixtures/README.md` の機械比較結果）なので、生成物は 1 つだけです。
+従来の新版・旧版は DOM 構造が同一（`fixtures/README.md` の機械比較結果）なので、生成物は 1 つだけです。
+2026 年の新 UI（`new/書類比較・クレームチェッカー_特願2025-557197.html`）では請求項境界が
+`span.claim_num` に、表示用番号が `cited_word` / `jump_link show_word` に変わり、用語クラス
+（`zenki_wdXX`）が無くなりました。抽出器は両方を扱い、用語クラスが無い場合は字面・段落・
+引用関係だけでグルーピングします（`fixtures/README.md` の「新 UI（2026 年）で変わった点」参照）。
 
 **引用関係は `#claim_cite`（引用一覧）から取ります。** `#claim_tree`（罫線ツリー）は引用パターン全展開の
 上限（5000）に達すると黙って欠落するため使いません。同じ理由で、引用一覧の「**被**引用請求項」欄も

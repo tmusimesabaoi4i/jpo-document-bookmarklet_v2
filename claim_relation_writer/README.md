@@ -173,7 +173,7 @@ claim_relation_writer/
 
 ページ側で「クレーム解析」が再実行された場合は `#claim_cite` と `#claim_tree` の両方を MutationObserver で監視し、陳腐化した構造からの生成を止めます。
 
-動作確認用に保存した対象ページのスナップショットは、リポジトリ共有の [`fixtures/claim-checker/`](../fixtures/claim-checker/)（`new/`・`legacy/`）にあります。引用パターン上限到達ケースは `new/書類比較・クレームチェッカー_引用パターン上限到達.html` です。
+動作確認用に保存した対象ページのスナップショットは、リポジトリ共有の [`fixtures/claim-checker/`](../fixtures/claim-checker/)（`new/`・`legacy/`）にあります。引用パターン上限到達ケースは `new/書類比較・クレームチェッカー_引用パターン上限到達.html`、2026 年の新 UI ケースは `new/書類比較・クレームチェッカー_特願2025-557197.html` です。新 UI では引用一覧の「引用請求項」が直接＋間接の全引用元になるため、間接引用を差し引いて直接引用元を復元します（`tests/bookmarklet.test.js` で固定）。
 
 ## 開発（テスト・ビルド）
 

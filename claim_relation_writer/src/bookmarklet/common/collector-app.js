@@ -52,11 +52,15 @@
   const OVERFLOW_SELECTORS = ['#claim_warn_overflow', '#claim_kian_overflow'];
 
   // div_tree / claim_cite の innerHTML をプレーンテキストへ（純関数・Nodeでテスト可能）。
-  // 罫線ツリーの中身は「テキスト + <br> 行終端」のみ、引用一覧は加えて <b> を含むが、
-  // どちらも残タグ除去と基本エンティティ復元で正しく平文化できる。&amp; の復元は必ず最後。
+  // 罫線ツリーの中身は「テキスト + <br> 行終端」のみ、引用一覧は加えて <b> と、
+  // 新 UI（2026 年〜）では請求項ごとの <div> を含む。ブロック境界を改行にしないと
+  // 引用一覧のレコードが 1 行に連結され、「次の [n]請求項」の境界判定が壊れる。
+  // 残タグ除去と基本エンティティ復元で正しく平文化できる。&amp; の復元は必ず最後。
   function treeHtmlToText(html) {
     let t = String(html == null ? '' : html);
     t = t.replace(/<br\s*\/?>/gi, '\n');
+    t = t.replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, '\n');
+    t = t.replace(/<(?:div|p|li|tr|h[1-6])(?:\s[^>]*)?>/gi, '\n');
     t = t.replace(/<[^>]*>/g, '');
     t = t.replace(/&nbsp;/gi, ' ')
       .replace(/&lt;/gi, '<')

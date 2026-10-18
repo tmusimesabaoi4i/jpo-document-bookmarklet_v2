@@ -15,6 +15,7 @@ const load = (rel) => parseHTML(fs.readFileSync(path.join(FIXTURES, rel), 'utf8'
 
 const F_2023 = 'new/経過_特願2023-170613.html';   // 他庁公開情報なし
 const F_2022 = 'new/経過_特願2022-122252.html';   // 他庁公開情報あり + ダミー行あり
+const F_2025 = 'new/経過_特願2025-557197.html';   // 新 UI（2026）: 国内書類 + OPD 2 件
 const F_BETA = 'legacy/特願2024-563143_beta.html'; // 旧世代（meta[LappnumStr] が残っている）
 const F_GEM  = 'legacy/特願2024-563143.html';      // 旧版ページ（gem.prototype）
 
@@ -113,6 +114,58 @@ test('2022-122252: 重複公開番号は正規化して除外される', () => {
   const opd = CORE.collectOpdRows(load(F_2022));
   const keys = opd.items.map((x) => x.key);
   assert.equal(new Set(keys).size, keys.length);
+});
+
+/* ============================================================
+ * _特願2025-557197.html（新 UI・2026）
+ * ============================================================ */
+test('2025-557197: 本願番号セルから出願番号を取得する', () => {
+  const doc = load(F_2025);
+  const got = CORE.resolveAppNo(doc, { href: '', pathname: '' });
+  assert.equal(got.appNo, '特願2025-557197');
+  assert.equal(got.source, '本願番号セル');
+});
+
+test('2025-557197: 国内書類を検出できる', () => {
+  const { items, skipped } = CORE.collectDocRows(load(F_2025));
+  assert.equal(skipped.length, 0);
+  assert.equal(items.length, 22);
+  for (const want of ['請求の範囲', '明細書', '国内書面', '要約書', '図面',
+    '手続補正書（自発・内容）', '出願番号特定通知書', '検索報告書', '国際公開']) {
+    assert.ok(names(items).includes(want), want + ' が検出されない');
+  }
+  const claims = items.find((x) => x.name === '請求の範囲');
+  assert.equal(claims.date, '20250930');
+  assert.equal(CORE.buildFileName(
+    CORE.buildBaseName({ appNo: '特願2025-557197', docName: claims.name, date: claims.date }), 'html'
+  ), '特願2025-557197_20250930_請求の範囲.html');
+});
+
+test('2025-557197: OPD 公開番号 2 件を検出できる', () => {
+  const opd = CORE.collectOpdRows(load(F_2025));
+  assert.equal(opd.available, true);
+  assert.deepEqual(opd.items.map((x) => x.pubnum), ['CN117693978A', 'WO2024207520A1']);
+  assert.deepEqual(opd.items.map((x) => x.date), ['20240312', '20241010']);
+  // CN は一括ダウンロードのボタンが無い行（ページ側の状態をそのまま反映する）
+  assert.deepEqual(opd.items.map((x) => [x.hasIndividual, x.hasConsolidated]),
+    [[false, false], [true, true]]);
+  // ボタンが無い行は既定選択・実行対象から外れる
+  assert.equal(CORE.opdHasAny(opd.items[0]), false);
+  assert.equal(CORE.opdSupports(opd.items[0], CORE.OPD_MODE.INDIVIDUAL), false);
+  assert.equal(CORE.opdSupports(opd.items[0], CORE.OPD_MODE.CONSOLIDATED), false);
+  assert.equal(CORE.opdHasAny(opd.items[1]), true);
+  assert.equal(CORE.opdSupports(opd.items[1], CORE.OPD_MODE.INDIVIDUAL), true);
+  assert.equal(CORE.opdSupports(opd.items[1], CORE.OPD_MODE.CONSOLIDATED), true);
+});
+
+test('OPD: 形式ごとの対応可否を判定できる（片方のボタンだけの行）', () => {
+  assert.equal(CORE.opdHasAny({ hasIndividual: true, hasConsolidated: false }), true);
+  assert.equal(CORE.opdSupports({ hasIndividual: true, hasConsolidated: false },
+    CORE.OPD_MODE.INDIVIDUAL), true);
+  assert.equal(CORE.opdSupports({ hasIndividual: true, hasConsolidated: false },
+    CORE.OPD_MODE.CONSOLIDATED), false);
+  assert.equal(CORE.opdHasAny(null), false);
+  assert.equal(CORE.opdSupports(null, CORE.OPD_MODE.INDIVIDUAL), false);
 });
 
 /* ============================================================

@@ -81,6 +81,9 @@ rejection_reason_bookmarklet/
 - 対象スナップショット: [`fixtures/claim-checker/new/書類比較・クレームチェッカー_特願2024-203064.html`](../fixtures/claim-checker/new/)
   （`file://` で開いた保存版ページ上での動作を確認。ページには CSP メタタグ
   `script-src 'self'` があるため、実行時に eval・`<script>` 挿入・外部読込を一切使わない設計）
+- 2026 年の新 UI スナップショット: [`fixtures/claim-checker/new/書類比較・クレームチェッカー_特願2025-557197.html`](../fixtures/claim-checker/new/)
+  （請求項境界が `span.claim_num`、表示用番号が `cited_word` / `jump_link show_word`、
+  引用一覧が「直接＋間接の全引用元」形式。`tests/new-ui-fixture.test.js` で固定）
 - 解析サンプル: [`fixtures/rejection-reason/拒絶理由例.txt`](../fixtures/rejection-reason/拒絶理由例.txt)
   （モーダルの「サンプルを読み込む」で同じ内容を読み込めます）
 - 解析はページ DOM に依存しないため、新旧どちらのチェッカー画面でも（他のページでも）動作します

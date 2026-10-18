@@ -9,6 +9,8 @@ const CASES = [
   { key: 'parallelTree', count: 24, independents: [1, 8, 15] },
   { key: 'categoryTrio', count: 30, independents: [1, 29, 30] },
   { key: 'multiIndependent', count: 43, independents: [1, 15, 16, 17, 24, 25, 26, 30, 31, 32, 33, 34, 35, 39, 40] },
+  // 新 UI（span.claim_num 境界・用語クラスなし）
+  { key: 'newClaimMark', count: 20, independents: [1, 17] },
 ];
 
 for (const testCase of CASES) {
@@ -140,6 +142,35 @@ test('請求項が取れないときはエラーで止めず案内文を返す',
   assert.strictEqual(result.claims.length, 0);
   assert.strictEqual(result.message, '請求項を取得できませんでした。先にクレーム解析を実行してください。');
 });
+
+test('新 UI: span.claim_num を境界に請求項を切り、cited_word / show_word の表示番号を捨てる',
+  { skip: !helpers.hasFixture('newClaimMark') }, () => {
+    const result = helpers.extract('newClaimMark');
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.source, 'claim_mark');
+    assert.strictEqual(result.claims.length, 20);
+    for (const claim of result.claims) {
+      assert.ok(!/\[\d+-\d+\]/.test(claim.rawText), '請求項' + claim.number + ' に表示用番号が残っている');
+      assert.ok(claim.rawText.indexOf('【請求項') === -1, '請求項' + claim.number + ' に見出しが混ざっている');
+      assert.ok(claim.rawText.replace(/[\s　]/g, '').length > 5);
+    }
+    // 新 UI は用語を包むクラスを持たない（空でも処理は続く）
+    assert.deepStrictEqual(result.claims[0].termClasses, []);
+    assert.deepStrictEqual(result.claims[0].terms, []);
+  });
+
+test('新 UI: 引用請求項の主リスト（直接＋間接）から間接引用を差し引いて直接引用元にする',
+  { skip: !helpers.hasFixture('newClaimMark') }, () => {
+    const result = helpers.extract('newClaimMark');
+    const byNumber = new Map(result.claims.map((c) => [c.number, c]));
+    // ページ表示: 請求項4「引用請求項：1,2（うち間接引用: 1）」→ 直接引用元は 2
+    assert.deepStrictEqual(byNumber.get(4).citations, [2]);
+    assert.deepStrictEqual(byNumber.get(7).citations, [6]);
+    assert.deepStrictEqual(byNumber.get(13).citations, [9]);
+    // 間接表示の無い多項従属は全件が直接引用元
+    assert.strictEqual(byNumber.get(19).citations.length, 16);
+    assert.deepStrictEqual(byNumber.get(20).citations, [17, 18]);
+  });
 
 test('抽出は元ページの DOM を書き換えない', { skip: !helpers.hasFixture('parallelTree') }, () => {
   const doc = helpers.loadDocument('parallelTree');

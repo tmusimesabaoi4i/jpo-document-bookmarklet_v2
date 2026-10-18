@@ -389,6 +389,12 @@ try {
   /*
    * 引用一覧（#claim_cite）のテキストから直接引用を読む。
    *   [12]請求項12 『・・方法』 従属請求項　引用請求項: 8　引用パターンの数: 1　被引用請求項: 13,14
+   * 新 UI は「引用請求項」に**全引用元**（直接＋間接）を並べ、括弧内に間接引用を示す:
+   *   引用請求項： 1,2（うち間接引用: 1）
+   * 旧 UI は直接引用元だけを並べ、括弧内に間接引用を示す:
+   *   引用請求項: 5 (間接引用: 1)
+   * どちらも「間接引用の番号は直接引用元ではない」ので、間接側に載る番号を差し引く
+   * （新旧どちらの書式でも差し引きは no-op か正しい除去になる）。
    * 「被引用請求項」は上限到達時に不完全になるため使わない（fixtures/README.md 参照）。
    * → { claims: [{ number, categoryLabel, isIndependent, citations }], total, independents }
    */
@@ -409,18 +415,26 @@ try {
       // 「被引用請求項」を拾わないよう、直前が区切り文字であることを要求する。
       // 被引用は上限到達時に不完全になるため、引用関係の復元に使ってはいけない。
       const citeMatch = /[\s　]引用請求項\s*[:：]\s*([\d,\s]+)/.exec(body);
+      const indirectMatch = /引用請求項\s*[:：][^（(\n]*[（(]\s*うち間接引用\s*[:：]\s*([\d,\s]+)/.exec(body);
+      const indirect = indirectMatch
+        ? indirectMatch[1].split(/[,\s]+/).filter((s) => s !== '').map(Number)
+        : [];
+      const indirectSet = new Set(indirect);
+      const citations = citeMatch
+        ? citeMatch[1].split(/[,\s]+/).filter((s) => s !== '').map(Number)
+          .filter((n) => !indirectSet.has(n))
+          .sort((a, b) => a - b)
+        : [];
       claims.push({
         number: starts[i].number,
         categoryLabel: categoryMatch ? categoryMatch[1].replace(/^[・･]+/, '').trim() : '',
         isIndependent: body.indexOf('独立請求項') !== -1,
-        citations: citeMatch
-          ? citeMatch[1].split(/[,\s]+/).filter((s) => s !== '').map(Number).sort((a, b) => a - b)
-          : [],
+        citations,
       });
     }
 
     const totalMatch = /合計請求項数\s*[:：]\s*(\d+)/.exec(src);
-    const indMatch = /独立請求項\s*[:：]\s*([\d,\s]+)\)/.exec(src);
+    const indMatch = /独立請求項\s*[:：]\s*([\d,\s]+)[)）]/.exec(src);
     return {
       claims,
       total: totalMatch ? Number(totalMatch[1]) : claims.length,
@@ -2824,7 +2838,8 @@ try {
  * extractor.js — 「書類比較・クレームチェッカー」から請求項を取り出す
  *
  * 収集元の優先順位:
- *   1. #claim_mark（クレーム解析済みの本文）… 既定。CLMNM<n> を境界に請求項へ切る
+ *   1. #claim_mark（クレーム解析済みの本文）… 既定。請求項見出しを境界に請求項へ切る
+ *      旧 UI は span#CLMNM<n>、新 UI（2026 年〜）は span.claim_num#claim<n> が境界。
  *   2. #claim_cite（引用一覧）… 引用請求項・独立/従属・カテゴリー末尾語の権威ある出所。
  *      上限到達時も全請求項を列挙するため欠落しない（fixtures/README.md 参照）
  *   3. #doc1 / #doc2 の入力欄 …「【請求項○】」を検出するフォールバック
@@ -2895,20 +2910,44 @@ try {
     return null;
   }
 
+  /*
+   * 請求項の境界マーカーかどうか。次の 2 世代を扱う:
+   *   旧 UI: <span id="CLMNM1">…</span>
+   *   新 UI: <span class="claim_num" id="claim1"><b>【請求項 1】</b></span>
+   * 新 UI は id が無い/変わっても見出し文言から番号を拾えるよう、本文も見る。
+   */
   function claimNumberOfMarker(el) {
     const id = el && el.id ? String(el.id) : '';
-    const m = /^CLMNM(\d+)$/.exec(id);
-    return m ? Number(m[1]) : null;
-  }
+    const oldFormat = /^CLMNM(\d+)$/.exec(id);
+    if (oldFormat) return Number(oldFormat[1]);
 
-  function isDisplayNumber(el) {
-    const cls = el && el.className ? String(el.className) : '';
-    return cls.indexOf('showCiteCited') !== -1;
+    const cls = classListOf(el);
+    if (cls.indexOf('claim_num') === -1 && !/^claim\d+$/.test(id)) return null;
+    const fromId = /^claim(\d+)$/.exec(id);
+    if (fromId) return Number(fromId[1]);
+    const fromText = /【\s*請求項\s*(\d+)\s*】/.exec(String(el.textContent || ''));
+    return fromText ? Number(fromText[1]) : null;
   }
 
   /*
-   * #claim_mark を文書順に歩き、CLMNM<n> を境界として請求項へ切る。
+   * ページが本文へ挿入した表示用番号（[1-1] 等）のノードか。
+   * 旧 UI は span.showCiteCited、新 UI は span.cited_word / span.jump_link.show_word
+   * の中に番号だけが入る。class だけでなく中身が番号であることも確かめ、
+   * 語を包む span（target_word 等）を誤って捨てないようにする。
+   */
+  function isDisplayNumber(el) {
+    const cls = el && el.className ? String(el.className) : '';
+    if (cls.indexOf('showCiteCited') !== -1) return true;
+    if (/(^|\s)(cited_word|show_word)(\s|$)/.test(cls)) {
+      return /^\[\d+-\d+\]$/.test(String(el.textContent || '').trim());
+    }
+    return false;
+  }
+
+  /*
+   * #claim_mark を文書順に歩き、請求項見出しを境界として請求項へ切る。
    * 表示用番号（[1-1] 等）のノードは捨て、用語クラス（zenki_wdXX）は拾う。
+   * 新 UI は用語を包むクラスを持たないため termClasses は空になる（処理は継続する）。
    */
   function readClaimMark(markEl) {
     const claims = [];

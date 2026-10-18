@@ -186,3 +186,16 @@ test('グループが1つも作れない案件でも、全請求項のグルー�
   assert.strictEqual(childDoc.querySelectorAll('.jcgc-card').length, 1);
   assert.ok(childDoc.querySelector('.jcgc-groupinfo').textContent.indexOf('全請求項') !== -1);
 });
+
+test('新 UI（span.claim_num）の実ページでも起動して比較画面を描く',
+  { skip: !helpers.hasFixture('newClaimMark') }, () => {
+    const { doc, win } = launchOn('newClaimMark');
+    doc.querySelector('#jcgc-launcher button').dispatchEvent({ type: 'click' });
+
+    assert.strictEqual(win.opened.length, 1, '新しいタブが開かれていない');
+    const childDoc = win.opened[0].document;
+    assert.ok(childDoc.querySelector('.jcgc-title'), '比較画面が描かれていない');
+    assert.ok(childDoc.querySelectorAll('.jcgc-card').length >= 2, '比較カードが描かれていない');
+    // 元ページは読み取り専用（#claim_mark を書き換えない）
+    assert.ok(doc.querySelector('#claim_mark'));
+  });

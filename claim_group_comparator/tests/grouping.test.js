@@ -229,6 +229,15 @@ test('請求項が1件以下ならグループを作らない', () => {
   assert.deepStrictEqual(grouping.autoGroup([makeClaim(1, [], '装置')], {}).groups, []);
 });
 
+test('新 UI（用語クラスなし）でも字面とツリーから比較候補を作れる',
+  { skip: !helpers.hasFixture('newClaimMark') }, () => {
+    const groups = groupsOf('newClaimMark', 'broad');
+    assert.ok(helpers.hasGroupContaining(groups, [1, 17]),
+      '独立項 1・17 が比較候補にならない: ' + groups.map((g) => g.claimNumbers.join(',')).join(' / '));
+    assert.ok(helpers.hasGroupContaining(groups, [19, 20]),
+      '装置項 19・20 が比較候補にならない: ' + groups.map((g) => g.claimNumbers.join(',')).join(' / '));
+  });
+
 /* ---- テスト用の請求項レコード ------------------------------------------ */
 function makeClaim(number, citations, text) {
   const normalize = require('../src/core/normalize');

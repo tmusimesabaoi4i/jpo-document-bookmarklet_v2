@@ -15,6 +15,7 @@ const load = (rel) => parseHTML(fs.readFileSync(path.join(FIXTURES, rel), 'utf8'
 
 const F_2022 = 'new/経過_特願2022-122252.html';   // 新版（#lappnum は「Evrikaでスクリーニング」）
 const F_2023 = 'new/経過_特願2023-170613.html';   // 新版
+const F_2025 = 'new/経過_特願2025-557197.html';   // 新 UI（2026）
 const F_BETA = 'legacy/特願2024-563143_beta.html'; // 旧世代（meta[LappnumStr] 残存 / #lappnum に出願番号）
 const F_GEM = 'legacy/特願2024-563143.html';       // 旧版ページ（gem.prototype）
 
@@ -47,6 +48,7 @@ test('新ページ: #lappnum の「Evrikaでスクリーニング」を出願番
 test('新ページ: 保存されるファイル名が 出願番号_note になる', () => {
   assert.equal(CORE.buildNoteTitle(CORE.resolveAppNo(load(F_2022), {}).appNo), '特願2022-122252_note');
   assert.equal(CORE.buildNoteTitle(CORE.resolveAppNo(load(F_2023), {}).appNo), '特願2023-170613_note');
+  assert.equal(CORE.buildNoteTitle(CORE.resolveAppNo(load(F_2025), {}).appNo), '特願2025-557197_note');
 });
 
 /* ============================================================

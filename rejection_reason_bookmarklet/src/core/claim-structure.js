@@ -38,13 +38,16 @@
   // ---- HTML → プレーンテキスト -------------------------------------------
 
   // クレーム解析結果の innerHTML をプレーンテキストにする。
-  // ページ側が本文に挿入した通番マーカー（<span class="showCiteCited…">[1-7]</span>）は
-  // 原文の一部ではないため取り除く。&amp; の復元は必ず最後。
+  // ページ側が本文に挿入した通番マーカーは原文の一部ではないため取り除く。
+  //   旧 UI: <span class="showCiteCited…">[1-7]</span>
+  //   新 UI: <span class="cited_word|jump_link show_word">[1-7]</span>
+  // どの世代でも「span の中身が [n-m] だけ」ならマーカーなので、class 名に依存せず除く。
+  // &amp; の復元は必ず最後。
   function claimHtmlToText(html) {
     let t = String(html == null ? '' : html);
     t = t.replace(/<br\s*\/?>/gi, '\n');
     // 通番マーカー（[1-7] 等）を span ごと除去する
-    t = t.replace(/<span[^>]*class="[^"]*showCiteCited[^"]*"[^>]*>\[[^\]<]*\]<\/span>/gi, '');
+    t = t.replace(/<span\b[^>]*>\s*\[\d+-\d+\]\s*<\/span>/gi, '');
     t = t.replace(/<[^>]*>/g, '');
     t = t.replace(/&nbsp;/gi, ' ')
       .replace(/&lt;/gi, '<')
@@ -442,8 +445,10 @@
     const numList = (s) => uniqueSorted(String(s || '').split(/[,、\s　]+/).filter((x) => x !== '').map(Number).filter((n) => !isNaN(n)));
     const diff = (a, b) => a.filter((n) => b.indexOf(n) === -1);
     const entries = [];
-    // 各請求項の記載: [n]請求項n … 次の [n]請求項 まで
-    const blockRe = /\[(\d+)\][ \t　]*請求項[ \t　]*(\d+)([\s\S]*?)(?=\n?\[\d+\][ \t　]*請求項|$)/g;
+    // 各請求項の記載: [n]請求項n … 次の [n]請求項 まで。
+    // 新 UI はレコードが <div> で並び、HTML→テキストで改行にならないことがあるため、
+    // 境界の空白は改行に限らない。
+    const blockRe = /\[(\d+)\][ \t　]*請求項[ \t　]*(\d+)([\s\S]*?)(?=[\s　]*\[\d+\][ \t　]*請求項|$)/g;
     let m;
     while ((m = blockRe.exec(text)) !== null) {
       const body = m[3];
@@ -452,8 +457,12 @@
       const citedByM = /被引用請求項[ \t　]*:[ \t　]*([\d,、\s　]+)/.exec(body);
       const indirectCitedByM = /間接被引用[ \t　]*:[ \t　]*([\d,、\s　]+)/.exec(body);
       const patternM = /引用パターンの数[ \t　]*:[ \t　]*(\d+)/.exec(body);
-      const directParents = parentsM ? numList(parentsM[1]) : [];
+      const listedParents = parentsM ? numList(parentsM[1]) : [];
       const indirectAncestors = indirectParentsM ? numList(indirectParentsM[1]) : [];
+      // 新 UI の「引用請求項」は直接＋間接の全引用元なので、間接分を除いて直接引用元にする。
+      // 旧 UI はもともと直接分だけなので、この差し引きは no-op。
+      const indirectAncestorSet = new Set(indirectAncestors);
+      const directParents = listedParents.filter((n) => !indirectAncestorSet.has(n));
       const allDescendants = citedByM ? numList(citedByM[1]) : [];
       const indirectDescendants = indirectCitedByM ? numList(indirectCitedByM[1]) : [];
       entries.push({

@@ -180,6 +180,12 @@
   /*
    * 引用一覧（#claim_cite）のテキストから直接引用を読む。
    *   [12]請求項12 『・・方法』 従属請求項　引用請求項: 8　引用パターンの数: 1　被引用請求項: 13,14
+   * 新 UI は「引用請求項」に**全引用元**（直接＋間接）を並べ、括弧内に間接引用を示す:
+   *   引用請求項： 1,2（うち間接引用: 1）
+   * 旧 UI は直接引用元だけを並べ、括弧内に間接引用を示す:
+   *   引用請求項: 5 (間接引用: 1)
+   * どちらも「間接引用の番号は直接引用元ではない」ので、間接側に載る番号を差し引く
+   * （新旧どちらの書式でも差し引きは no-op か正しい除去になる）。
    * 「被引用請求項」は上限到達時に不完全になるため使わない（fixtures/README.md 参照）。
    * → { claims: [{ number, categoryLabel, isIndependent, citations }], total, independents }
    */
@@ -200,18 +206,26 @@
       // 「被引用請求項」を拾わないよう、直前が区切り文字であることを要求する。
       // 被引用は上限到達時に不完全になるため、引用関係の復元に使ってはいけない。
       const citeMatch = /[\s　]引用請求項\s*[:：]\s*([\d,\s]+)/.exec(body);
+      const indirectMatch = /引用請求項\s*[:：][^（(\n]*[（(]\s*うち間接引用\s*[:：]\s*([\d,\s]+)/.exec(body);
+      const indirect = indirectMatch
+        ? indirectMatch[1].split(/[,\s]+/).filter((s) => s !== '').map(Number)
+        : [];
+      const indirectSet = new Set(indirect);
+      const citations = citeMatch
+        ? citeMatch[1].split(/[,\s]+/).filter((s) => s !== '').map(Number)
+          .filter((n) => !indirectSet.has(n))
+          .sort((a, b) => a - b)
+        : [];
       claims.push({
         number: starts[i].number,
         categoryLabel: categoryMatch ? categoryMatch[1].replace(/^[・･]+/, '').trim() : '',
         isIndependent: body.indexOf('独立請求項') !== -1,
-        citations: citeMatch
-          ? citeMatch[1].split(/[,\s]+/).filter((s) => s !== '').map(Number).sort((a, b) => a - b)
-          : [],
+        citations,
       });
     }
 
     const totalMatch = /合計請求項数\s*[:：]\s*(\d+)/.exec(src);
-    const indMatch = /独立請求項\s*[:：]\s*([\d,\s]+)\)/.exec(src);
+    const indMatch = /独立請求項\s*[:：]\s*([\d,\s]+)[)）]/.exec(src);
     return {
       claims,
       total: totalMatch ? Number(totalMatch[1]) : claims.length,

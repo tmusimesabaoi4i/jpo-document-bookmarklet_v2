@@ -13,6 +13,25 @@ const ROOT = path.join(__dirname, '..');
 const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const readNormalized = (p) => fs.readFileSync(p, 'utf8').replace(/\r\n?/g, '\n');
 
+// fixture 内の <div id="…"> の中身を取り出す（入れ子の div を数えて対応を取る）
+function innerHtmlById(html, id) {
+  const attr = html.indexOf('id="' + id + '"');
+  if (attr === -1) return null;
+  const open = html.lastIndexOf('<', attr);
+  const tag = /^<([a-z0-9]+)/i.exec(html.slice(open));
+  if (!tag) return null;
+  const openEnd = html.indexOf('>', attr) + 1;
+  let depth = 1;
+  const re = new RegExp('<(/?)' + tag[1] + '\\b[^>]*>', 'gi');
+  re.lastIndex = openEnd;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    depth += m[1] === '/' ? -1 : 1;
+    if (depth === 0) return html.slice(openEnd, m.index);
+  }
+  return null;
+}
+
 test('生成物の鮮度: コミット済み4ファイルが再ビルド結果と一致（EOL正規化）', () => {
   for (const targetKey of Object.keys(build.TARGETS)) {
     const artifacts = build.buildArtifacts(targetKey);
@@ -111,6 +130,40 @@ test('treeHtmlToText: タグ除去・エンティティ復元・境界', () => {
   assert.equal(collectorApp.treeHtmlToText('&amp;lt;'), '&lt;'); // &amp; の復元は最後（二重復元しない）
   assert.equal(collectorApp.treeHtmlToText(''), '');
   assert.equal(collectorApp.treeHtmlToText(null), '');
+});
+
+test('treeHtmlToText: 新 UI の <div> 区切りを改行にしてレコードを連結しない', () => {
+  const html = '<div>[1]請求項1 独立請求項<br>被引用請求項: 2</div>'
+    + '<div>[2]請求項2 従属請求項<br>引用請求項: 1</div>';
+  const text = collectorApp.treeHtmlToText(html);
+  assert.ok(/\n\s*\[2\]請求項2/.test(text), '請求項2 が独立した行になっていない: ' + JSON.stringify(text));
+  assert.ok(text.indexOf('[1]請求項1') !== -1);
+});
+
+test('parseClaimCite: 新 UI の全引用元リストから間接引用を差し引く', () => {
+  // 旧 UI: 主リストは直接引用元のみ（間接分は括弧内だけ）→ 差し引きは no-op
+  const oldStyle = structure.parseClaimStructure(
+    ['合計請求項数:3 (独立請求項:1)',
+      '[1]請求項1 『・・方法』 独立請求項',
+      '[2]請求項2 『・・方法』 従属請求項',
+      '　引用請求項: 1　引用パターンの数: 1',
+      '[3]請求項3 『・・方法』 従属請求項',
+      '　引用請求項: 2 (間接引用: 1)　引用パターンの数: 1'].join('\n')
+  );
+  assert.equal(oldStyle.ok, true);
+  assert.deepEqual(oldStyle.graph.edges.filter((e) => e[1] === 3), [[2, 3]]);
+
+  // 新 UI: 主リストは直接＋間接の全引用元 → 間接分を差し引く
+  const newStyle = structure.parseClaimStructure(
+    ['合計請求項数:3 (独立請求項:1)',
+      '[1]請求項1 『・・方法』 独立請求項',
+      '[2]請求項2 『・・方法』 従属請求項',
+      '　引用請求項: 1　引用パターンの数: 1',
+      '[3]請求項3 『・・方法』 従属請求項',
+      '　引用請求項: 1,2（うち間接引用: 1）　引用パターンの数: 1'].join('\n')
+  );
+  assert.equal(newStyle.ok, true);
+  assert.deepEqual(newStyle.graph.edges.filter((e) => e[1] === 3), [[2, 3]]);
 });
 
 test('extractTreeText: セレクタ優先順・空スキップ・全滅時の救済メッセージ', () => {
@@ -242,4 +295,31 @@ test('実ページ: 上限到達スナップショットから引用一覧が選
   assert.equal(parsed.graph.nodes.length, 92);
   assert.deepEqual(parsed.graph.roots, [1, 22, 42, 43, 46, 68, 89, 90]);
   assert.equal(parsed.meta.overflow, true);
+});
+
+test('実ページ（新 UI）: <div> 区切りの引用一覧を解析し、間接引用を直接引用と混同しない', () => {
+  const file = path.join(
+    ROOT, '..', 'fixtures', 'claim-checker', 'new',
+    '書類比較・クレームチェッカー_特願2025-557197.html'
+  );
+  const html = fs.readFileSync(file, 'utf8');
+  const citeHtml = innerHtmlById(html, 'claim_cite');
+  assert.ok(citeHtml, '#claim_cite が見つからない');
+
+  const text = collectorApp.treeHtmlToText(citeHtml);
+  assert.ok(/\n\s*\[2\]請求項2/.test(text), '請求項ごとの行が復元されていない');
+
+  const parsed = structure.parseClaimStructure(text);
+  assert.equal(parsed.ok, true, JSON.stringify(parsed.errors));
+  assert.equal(parsed.format, 'cite');
+  assert.equal(parsed.graph.nodes.length, 20);
+  assert.deepEqual(parsed.graph.roots, [1, 17]);
+  assert.equal(parsed.graph.edges.length, 34);
+  // 「引用請求項：1,2（うち間接引用: 1）」→ 直接引用元は 2 だけ
+  assert.deepEqual(parsed.graph.edges.filter((e) => e[1] === 4), [[2, 4]]);
+  assert.deepEqual(parsed.graph.edges.filter((e) => e[1] === 7), [[6, 7]]);
+  assert.deepEqual(parsed.graph.edges.filter((e) => e[1] === 13), [[9, 13]]);
+  assert.deepEqual(parsed.graph.edges.filter((e) => e[1] === 19).map((e) => e[0]),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  assert.deepEqual(parsed.warnings, []);
 });

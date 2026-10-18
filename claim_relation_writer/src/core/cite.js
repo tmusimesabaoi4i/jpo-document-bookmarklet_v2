@@ -16,7 +16,10 @@
  *   　被引用請求項: 7,8,9(うち間接被引用: 9)
  *
  * 重要な既知の非対称性（実データで検証済み）:
- *   - 「引用請求項」＝**直接**引用元、「(間接引用: …)」＝間接引用元。上限到達時も完全。
+ *   - 「引用請求項」の主リストは、旧 UI では**直接**引用元のみ、新 UI では
+ *     **直接＋間接**の全引用元。どちらも括弧内の「(うち間接引用: …)」が間接分を示す。
+ *     そこで主リストから間接分を差し引いて直接引用元を求め、エッジは直接分だけにする
+ *     （差し引いても旧 UI では no-op なので、新旧どちらの書式でも同じ結果になる）。
  *   - 「被引用請求項」＝直接＋間接の全下位。**上限到達時は不完全**（実例で 857 中 219 のみ）。
  *   したがって**エッジは必ず「引用請求項」（順方向）からのみ構築する**。「被引用請求項」は
  *   上限に達していない場合のクロスチェックにのみ使う。
@@ -68,8 +71,10 @@
   const uniqueSorted = (arr) => [...new Set(arr)].sort((a, b) => a - b);
   const setOfEdges = (edges) => new Set(edges.map((e) => e[0] + '>' + e[1]));
 
-  // 「[6]請求項6 …」ブロックの切り出し。次の「[n]請求項」直前まで（最後は文末まで）
-  const BLOCK_RE = /\[(\d+)\][ \t　]*請求項[ \t　]*(\d+)([\s\S]*?)(?=\n[ \t　]*\[\d+\][ \t　]*請求項|$)/g;
+  // 「[6]請求項6 …」ブロックの切り出し。次の「[n]請求項」直前まで（最後は文末まで）。
+  // 新 UI はレコードが <div> で並び、HTML→テキストで改行になるが、呼び出し側が
+  // 改行を落としたテキストを渡しても壊れないよう、境界の空白は改行に限らない。
+  const BLOCK_RE = /\[(\d+)\][ \t　]*請求項[ \t　]*(\d+)([\s\S]*?)(?=[\s　]*\[\d+\][ \t　]*請求項|$)/g;
   // 「被引用請求項」は「引用請求項」を部分文字列として含むため否定後読みで区別する
   const PARENTS_RE = /(?<!被)引用請求項[ \t　]*:[ \t　]*([\d,、\s]+)/;
   const INDIRECT_PARENTS_RE = /(?<!被)間接引用[ \t　]*:[ \t　]*([\d,、\s]+)/;
@@ -145,15 +150,19 @@
       nodes.add(claim);
 
       const parentsM = PARENTS_RE.exec(body);
-      const directParents = parentsM ? numList(parentsM[1]) : [];
-      if (directParents.indexOf(claim) !== -1) {
+      const indirectParentsM = INDIRECT_PARENTS_RE.exec(body);
+      const listedParents = parentsM ? numList(parentsM[1]) : [];
+      const indirectParents = indirectParentsM ? numList(indirectParentsM[1]) : [];
+      if (listedParents.indexOf(claim) !== -1) {
         addError(ln, '請求項' + claim + 'が自分自身を引用しています');
         continue;
       }
-      for (const p of directParents) {
-        nodes.add(p);
-        addEdge(p, claim);
-      }
+      // 新 UI の主リスト（全引用元）から間接分を除いて直接引用元にする。
+      // 旧 UI の主リスト（直接引用元のみ）では間接分が含まれないため、この差し引きは no-op。
+      const indirectSet = new Set(indirectParents);
+      const directParents = listedParents.filter((p) => !indirectSet.has(p));
+      for (const p of listedParents) nodes.add(p);
+      for (const p of directParents) addEdge(p, claim);
 
       const patternM = PATTERN_COUNT_RE.exec(body);
       if (patternM) patternCounts[claim] = parseInt(patternM[1], 10);
@@ -168,8 +177,6 @@
           if (!indirect.has(c)) revEdges.push([claim, c]);
         }
       }
-      // 「(間接引用: …)」は推移閉包から再計算できるため保持のみ（解析には使わない）
-      INDIRECT_PARENTS_RE.exec(body);
     }
 
     if (seenClaims.size === 0) {

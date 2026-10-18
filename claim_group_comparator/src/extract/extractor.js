@@ -2,7 +2,8 @@
  * extractor.js — 「書類比較・クレームチェッカー」から請求項を取り出す
  *
  * 収集元の優先順位:
- *   1. #claim_mark（クレーム解析済みの本文）… 既定。CLMNM<n> を境界に請求項へ切る
+ *   1. #claim_mark（クレーム解析済みの本文）… 既定。請求項見出しを境界に請求項へ切る
+ *      旧 UI は span#CLMNM<n>、新 UI（2026 年〜）は span.claim_num#claim<n> が境界。
  *   2. #claim_cite（引用一覧）… 引用請求項・独立/従属・カテゴリー末尾語の権威ある出所。
  *      上限到達時も全請求項を列挙するため欠落しない（fixtures/README.md 参照）
  *   3. #doc1 / #doc2 の入力欄 …「【請求項○】」を検出するフォールバック
@@ -73,20 +74,44 @@
     return null;
   }
 
+  /*
+   * 請求項の境界マーカーかどうか。次の 2 世代を扱う:
+   *   旧 UI: <span id="CLMNM1">…</span>
+   *   新 UI: <span class="claim_num" id="claim1"><b>【請求項 1】</b></span>
+   * 新 UI は id が無い/変わっても見出し文言から番号を拾えるよう、本文も見る。
+   */
   function claimNumberOfMarker(el) {
     const id = el && el.id ? String(el.id) : '';
-    const m = /^CLMNM(\d+)$/.exec(id);
-    return m ? Number(m[1]) : null;
-  }
+    const oldFormat = /^CLMNM(\d+)$/.exec(id);
+    if (oldFormat) return Number(oldFormat[1]);
 
-  function isDisplayNumber(el) {
-    const cls = el && el.className ? String(el.className) : '';
-    return cls.indexOf('showCiteCited') !== -1;
+    const cls = classListOf(el);
+    if (cls.indexOf('claim_num') === -1 && !/^claim\d+$/.test(id)) return null;
+    const fromId = /^claim(\d+)$/.exec(id);
+    if (fromId) return Number(fromId[1]);
+    const fromText = /【\s*請求項\s*(\d+)\s*】/.exec(String(el.textContent || ''));
+    return fromText ? Number(fromText[1]) : null;
   }
 
   /*
-   * #claim_mark を文書順に歩き、CLMNM<n> を境界として請求項へ切る。
+   * ページが本文へ挿入した表示用番号（[1-1] 等）のノードか。
+   * 旧 UI は span.showCiteCited、新 UI は span.cited_word / span.jump_link.show_word
+   * の中に番号だけが入る。class だけでなく中身が番号であることも確かめ、
+   * 語を包む span（target_word 等）を誤って捨てないようにする。
+   */
+  function isDisplayNumber(el) {
+    const cls = el && el.className ? String(el.className) : '';
+    if (cls.indexOf('showCiteCited') !== -1) return true;
+    if (/(^|\s)(cited_word|show_word)(\s|$)/.test(cls)) {
+      return /^\[\d+-\d+\]$/.test(String(el.textContent || '').trim());
+    }
+    return false;
+  }
+
+  /*
+   * #claim_mark を文書順に歩き、請求項見出しを境界として請求項へ切る。
    * 表示用番号（[1-1] 等）のノードは捨て、用語クラス（zenki_wdXX）は拾う。
+   * 新 UI は用語を包むクラスを持たないため termClasses は空になる（処理は継続する）。
    */
   function readClaimMark(markEl) {
     const claims = [];

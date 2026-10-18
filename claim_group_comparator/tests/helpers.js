@@ -18,6 +18,9 @@ const FIXTURES = {
   multiIndependent: '書類比較・クレームチェッカー_特願2024-536222.html',
   overflow: '書類比較・クレームチェッカー_引用パターン上限到達.html',
   base: '書類比較・クレームチェッカー.html',
+  // 新 UI（2026 年〜）: #claim_mark の境界が CLMNM から span.claim_num に変わり、
+  // 用語クラス（zenki_wdXX）が無くなったスナップショット
+  newClaimMark: '書類比較・クレームチェッカー_特願2025-557197.html',
 };
 
 function fixturePath(key) {

@@ -392,6 +392,15 @@
     };
   }
 
+  /* その公開番号が一括ダウンロードに対応しているか（新 UI は行ごとにボタンの有無が異なる） */
+  function opdHasAny(it) {
+    return !!(it && (it.hasIndividual || it.hasConsolidated));
+  }
+  function opdSupports(it, mode) {
+    if (!it) return false;
+    return mode === OPD_MODE.CONSOLIDATED ? !!it.hasConsolidated : !!it.hasIndividual;
+  }
+
   /* ============================================================
    * 6. URL 解決
    * ============================================================ */
@@ -548,6 +557,8 @@
     isDummyContentId: isDummyContentId,
     collectDocRows: collectDocRows,
     collectOpdRows: collectOpdRows,
+    opdHasAny: opdHasAny,
+    opdSupports: opdSupports,
     resolveContentUrlTemplate: resolveContentUrlTemplate,
     opdUrlsFromGlobals: opdUrlsFromGlobals,
     extractOpdUrlsFromSource: extractOpdUrlsFromSource,
@@ -1327,7 +1338,8 @@
       if (DEFAULT_KEYS.some(function (k) { return (it.name || '').indexOf(k) > -1; })) domSelected[it.idx] = true;
     });
     var opdSelected = {};
-    opd.items.forEach(function (it) { opdSelected[it.key] = true; });
+    /* 一括ダウンロードのボタンが無い公開番号は選択しない（新 UI では行ごとに可否が異なる） */
+    opd.items.forEach(function (it) { opdSelected[it.key] = opdHasAny(it); });
     var opdStates = {};
     var logs = [];
     var ctl = { canceled: false, controller: (typeof AbortController === 'function') ? new AbortController() : null };
@@ -1411,19 +1423,24 @@
         opdList.innerHTML = '<div class="__empty">' + esc(why) + '</div>';
         return;
       }
+      var mode = getOpdMode();
       opdList.innerHTML = opd.items.map(function (it) {
         var id = '__opdpick_' + it.idx;
         var st = opdStates[it.key] || { state: OPD_STATE.WAITING, message: '' };
+        var can = opdSupports(it, mode);
         return '<div class="__row" data-key="' + esc(it.key) + '">' +
           '<label for="' + id + '">' +
-          '<input type="checkbox" id="' + id + '" data-key="' + esc(it.key) + '"' + (opdSelected[it.key] ? ' checked' : '') + '>' +
+          '<input type="checkbox" id="' + id + '" data-key="' + esc(it.key) + '"' +
+            (opdSelected[it.key] && can ? ' checked' : '') + (can ? '' : ' disabled') + '>' +
           '<span class="__name">' + esc(it.display) + '</span>' +
           (it.date ? '<span class="__meta">（' + esc(it.date) + '）</span>' : '') +
+          (can ? '' : '<span class="__meta">（この形式の一括DL不可）</span>') +
           '</label>' +
           '<span class="__stwrap">' + badgeHtml(st.state, st.message) + '</span>' +
           '</div>';
       }).join('');
     }
+
 
     function setOpdState(key, state, message) {
       opdStates[key] = { state: state, message: message || '' };
@@ -1440,8 +1457,17 @@
       opdGroup.classList.toggle('__off', !on);
       opdBox.classList.toggle('__off', !on);
       qsa('input[name=__opdmode]', root).forEach(function (rb) { rb.disabled = !on; });
-      /* 選択状態は保持したまま操作だけ止める（再有効化で復元される） */
-      qsa('input[type=checkbox]', opdList).forEach(function (cb) { cb.disabled = !on; });
+      /* 選択状態は保持したまま操作だけ止める（再有効化で復元される）。
+         一括DLボタンが無い公開番号は、API 有効時でも選択できないままにする。 */
+      var mode = getOpdMode();
+      qsa('input[type=checkbox][data-key]', opdList).forEach(function (cb) {
+        var key = cb.getAttribute('data-key');
+        var it = null;
+        for (var i = 0; i < opd.items.length; i++) {
+          if (opd.items[i].key === key) { it = opd.items[i]; break; }
+        }
+        cb.disabled = !on || !it || !opdSupports(it, mode);
+      });
       qs('#__opdall', root).disabled = !on;
       qs('#__opdnone', root).disabled = !on;
       updateStartLabel();
@@ -1453,7 +1479,8 @@
     }
     function getSelectedOpd() {
       if (!opdEnabled()) return [];
-      return opd.items.filter(function (it) { return !!opdSelected[it.key]; });
+      var mode = getOpdMode();
+      return opd.items.filter(function (it) { return !!opdSelected[it.key] && opdSupports(it, mode); });
     }
     function getModes() {
       var m = qsa('input[name=__mode]:checked', root).map(function (cb) { return cb.value; });
@@ -1791,13 +1818,14 @@
 
     /* OPD の全選択・全解除は国内書類の操作と完全に独立 */
     qs('#__opdall', root).addEventListener('click', function () {
-      opd.items.forEach(function (it) { opdSelected[it.key] = true; });
-      qsa('input[type=checkbox][data-key]', opdList).forEach(function (cb) { cb.checked = true; });
+      var mode = getOpdMode();
+      opd.items.forEach(function (it) { opdSelected[it.key] = opdSupports(it, mode); });
+      renderOpd();
       updateStartLabel();
     });
     qs('#__opdnone', root).addEventListener('click', function () {
       opd.items.forEach(function (it) { opdSelected[it.key] = false; });
-      qsa('input[type=checkbox][data-key]', opdList).forEach(function (cb) { cb.checked = false; });
+      renderOpd();
       updateStartLabel();
     });
     opdList.addEventListener('change', function (e) {
@@ -1809,7 +1837,9 @@
     });
     opdOn.addEventListener('change', syncOpdEnabled);
     qsa('input[name=__mode]', root).forEach(function (cb) { cb.addEventListener('change', updateStartLabel); });
-    qsa('input[name=__opdmode]', root).forEach(function (rb) { rb.addEventListener('change', updateStartLabel); });
+    qsa('input[name=__opdmode]', root).forEach(function (rb) {
+      rb.addEventListener('change', function () { renderOpd(); updateStartLabel(); });
+    });
 
     qsa('input[name=__savemode]', root).forEach(function (rb) {
       rb.addEventListener('change', function () {
